@@ -12,7 +12,7 @@
 
 ## 当前已实现
 
-- 课程地图（HTML/CSS/JS、工程化、TypeScript、Vue）
+- 课程地图（HTML/CSS/JS、JavaScript 提高、工程化、TypeScript、Vue）
 - 课程级代码模板（HTML/CSS/JS）
 - 左侧教学区整块切换：
   - `教学文档`：读取本地 `.md` 文件并渲染
@@ -33,8 +33,23 @@ src/
       basics-html.md
       basics-css.md
       basics-js.md
-    engineering.md
-    typescript.md
+    improve/
+      imp-01-types-coercion-strings.md
+      imp-02-arrays.md
+      imp-03-objects-iteration.md
+      imp-04-prototype-scope-closure.md
+      imp-05-memory-v8-gc.md
+      imp-06-async.md
+      imp-07-network-modules-es6.md
+    engineering/
+      eng-01-node-packages.md
+      eng-02-vite-and-build.md
+      eng-03-git-and-modules.md
+    typescript/
+      ts-01-intro-tuple-enum.md
+      ts-02-type-alias-and-generics.md
+      ts-03-utility-pick-omit.md
+      ts-04-returntype-nonnullable.md
     vue.md
   data/
     lessons.ts
@@ -54,17 +69,18 @@ src/
 - `src/content/docs/base/basics-css.md`（第一章 · CSS 节）
 - `src/content/docs/base/basics-js.md`（第一章 · JS 节）
 - 侧栏「N 节」的 **N** 在运行时按对应 `.md` 正文中 `##` 行数统计（`moduleDocMarkdown.ts`），与 Vite 热更联动，**不必**为节数再维护手填表
-- `src/content/docs/engineering.md`
-- `src/content/docs/typescript.md`
+- `src/content/docs/improve/imp-01-…` 等七份（与 `imp-01`～`imp-07` 一一对应，见 `improveByLessonId`）
+- `src/content/docs/engineering/eng-01-node-packages.md` 等三份（与 `eng-01` / `eng-02` / `eng-03` 一一对应，见 `engineeringByLessonId`）
+- `src/content/docs/typescript/ts-01-…` 等四份（与 `ts-01`～`ts-04` 一一对应，见 `typescriptByLessonId`）
 - `src/content/docs/vue.md`
 
-`module` 为 `basics` 时，会按**当前课程 id**（`ch1-html` / `ch1-css` / `ch1-js`）切换上述三份文档；其他模块见 `getDocMarkdown()`。
+`module` 为 `basics` 时，会按**当前课程 id**（`ch1-html` / `ch1-css` / `ch1-js`）切换上述三份文档；`improve`、`engineering`、`typescript` 等模块按**子课 id** 绑定子文档。其余见 `getDocMarkdown()`。
 
 新增章节流程：
 
 1. 在对应 `.md` 文件中按章节追加内容（第一章三份分别维护）
-2. 如果新增模块，补充一个新的 `.md` 文件并在 `moduleDocMarkdownMap` 中登记
-3. 若在第一章增加新课节，在 `lessons` 与 `moduleDocMarkdown.ts` 的 `basicsByLessonId` 中同时挂上 id 与文件
+2. 如果新增模块，补充 `moduleDocMarkdownMap` 与 `lessons`；若子文档**按课拆分**，在 `getDocMarkdown` 的 `*ByLessonId` 映射中登记
+3. 若在第一章、JavaScript 提高、工程化或 **TypeScript** 下增加子课，在 `lessons` 与 `basicsByLessonId` / `improveByLessonId` / `engineeringByLessonId` / `typescriptByLessonId` 中同时挂上 id 与文件
 
 ## 本地开发
 

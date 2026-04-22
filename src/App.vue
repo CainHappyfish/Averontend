@@ -10,9 +10,10 @@ import {
   getCh1Lessons,
   getLessonsForModule,
 } from './data/courseMap'
+import { getLessonExercises } from './data/lessonExercises'
 import { lessons, moduleNameMap } from './data/lessons'
 import { getDocMarkdown, getDocSectionCountForLesson } from './data/moduleDocMarkdown'
-import type { ModuleKey } from './types/lesson'
+import type { Lesson, ModuleKey } from './types/lesson'
 import { buildSandboxDocument } from './sandbox/buildSandboxDocument'
 import { transpileScript } from './sandbox/transpileScript'
 
@@ -47,18 +48,48 @@ const runtimeState = ref<'idle' | 'running' | 'success' | 'error'>('idle')
 const autoRunEnabled = ref(true)
 const isHydratingLesson = ref(false)
 const cleanTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const activeExerciseId = ref('')
+
+const currentExercises = computed(() =>
+  selectedLesson.value ? getLessonExercises(selectedLesson.value.id) : [],
+)
+
+const currentExercise = computed(() => {
+  const list = currentExercises.value
+  if (!list.length) return null
+  return list.find((e) => e.id === activeExerciseId.value) ?? list[0] ?? null
+})
 
 const DRAFT_STORAGE_KEY = 'averontend:lesson-drafts'
 const LAST_LESSON_KEY = 'averontend:last-lesson-id'
 const COMPLETED_KEY = 'averontend:completed-lesson-ids'
 const VISITED_KEY = 'averontend:visited-lesson-ids'
 
+/** 旧站课程 id 迁移（localStorage 里仍可能存着旧值） */
+const LEGACY_LESSON_IDS: Record<string, string> = {
+  'html-card': 'ch1-html',
+  'vite-script': 'eng-01',
+  'ts-user': 'ts-01',
+}
+
+const normalizeStoredLessonId = (id: string) => LEGACY_LESSON_IDS[id] ?? id
+
 const readCompletedIds = (): Set<string> => {
   try {
     const raw = localStorage.getItem(COMPLETED_KEY)
     if (!raw) return new Set()
     const arr = JSON.parse(raw) as string[]
-    return new Set(arr)
+    const out = new Set<string>()
+    let changed = false
+    for (const id of arr) {
+      const n = normalizeStoredLessonId(id)
+      if (n !== id) changed = true
+      out.add(n)
+    }
+    if (changed) {
+      localStorage.setItem(COMPLETED_KEY, JSON.stringify([...out]))
+    }
+    return out
   } catch {
     return new Set()
   }
@@ -69,7 +100,17 @@ const readVisitedIds = (): Set<string> => {
     const raw = localStorage.getItem(VISITED_KEY)
     if (!raw) return new Set()
     const arr = JSON.parse(raw) as string[]
-    return new Set(arr)
+    const out = new Set<string>()
+    let changed = false
+    for (const id of arr) {
+      const n = normalizeStoredLessonId(id)
+      if (n !== id) changed = true
+      out.add(n)
+    }
+    if (changed) {
+      localStorage.setItem(VISITED_KEY, JSON.stringify([...out]))
+    }
+    return out
   } catch {
     return new Set()
   }
@@ -119,6 +160,10 @@ const scrollbarCleanupFns: Array<() => void> = []
 
 const selectedLesson = computed(() => lessons.find((item) => item.id === selectedLessonId.value))
 const lessonIndex = computed(() => lessons.findIndex((item) => item.id === selectedLessonId.value))
+/** 未写 `practiceRequiresSandbox` 时默认需要沙箱；工程化等课在本地完成练习 */
+const lessonNeedsSandbox = computed(
+  () => selectedLesson.value?.practiceRequiresSandbox !== false,
+)
 const hasPrevLesson = computed(() => lessonIndex.value > 0)
 const hasNextLesson = computed(() => lessonIndex.value < lessons.length - 1)
 
@@ -222,6 +267,7 @@ const getModuleBarWidth = (m: MapSidebarModule) => {
 }
 
 const mapModuleOpen = ref<Record<MapSidebarModule, boolean>>({
+  improve: false,
   engineering: false,
   typescript: false,
   vue: false,
@@ -288,6 +334,18 @@ const renderPreview = async (doc: string) => {
 }
 
 const runCode = async () => {
+  if (!lessonNeedsSandbox.value) {
+    runtimeState.value = 'idle'
+    consoleLogs.value = [
+      '[提示] 本课练习在本地终端或本机仓库中完成，无需在右侧沙箱中运行或预览。',
+    ]
+    previewDoc.value = buildSandboxDocument({
+      html: `<p class="local-practice-hint">本课无必做沙箱练习。请切换「文档」/「练练？」在本地跟练。</p>`,
+      css: `.local-practice-hint { margin: 0; color: #475569; font-size: 14px; line-height: 1.5; }`,
+      js: '',
+    })
+    return
+  }
   const ticket = ++runTicket
   runtimeState.value = 'running'
   consoleLogs.value = ['[system] 代码执行中...']
@@ -315,20 +373,37 @@ const runCode = async () => {
 }
 
 const scheduleAutoRun = () => {
+  if (!lessonNeedsSandbox.value) return
   if (!autoRunEnabled.value || isHydratingLesson.value) return
   if (autoRunTimer) clearTimeout(autoRunTimer)
   autoRunTimer = setTimeout(() => void runCode(), 420)
+}
+
+const applyMergedStarter = (lesson: Lesson, exerciseId: string) => {
+  const exs = getLessonExercises(lesson.id)
+  const ex = exs.find((e) => e.id === exerciseId) ?? exs[0]
+  const base = lesson.starterCode
+  const p = ex?.starterCode
+  htmlCode.value = p?.html ?? base.html
+  cssCode.value = p?.css ?? base.css
+  jsCode.value = p?.js ?? base.js
 }
 
 const loadLesson = async (lessonId: string) => {
   const lesson = lessons.find((item) => item.id === lessonId)
   if (!lesson) return
   const draft = readDrafts()[lesson.id]
+  const exs = getLessonExercises(lesson.id)
   isHydratingLesson.value = true
   selectedLessonId.value = lesson.id
-  htmlCode.value = draft?.html ?? lesson.starterCode.html
-  cssCode.value = draft?.css ?? lesson.starterCode.css
-  jsCode.value = draft?.js ?? lesson.starterCode.js
+  activeExerciseId.value = exs[0]?.id ?? ''
+  if (draft) {
+    htmlCode.value = draft.html
+    cssCode.value = draft.css
+    jsCode.value = draft.js
+  } else {
+    applyMergedStarter(lesson, activeExerciseId.value)
+  }
   activeEditorTab.value = 'html'
   runtimeState.value = 'idle'
   consoleLogs.value = []
@@ -354,9 +429,21 @@ const goNext = async () => {
 const resetLesson = async () => {
   const lesson = selectedLesson.value
   if (!lesson) return
-  htmlCode.value = lesson.starterCode.html
-  cssCode.value = lesson.starterCode.css
-  jsCode.value = lesson.starterCode.js
+  isHydratingLesson.value = true
+  applyMergedStarter(lesson, activeExerciseId.value)
+  isHydratingLesson.value = false
+  persistDraft()
+  await runCode()
+}
+
+const selectExercise = async (id: string) => {
+  const lesson = selectedLesson.value
+  if (!lesson) return
+  if (activeExerciseId.value === id) return
+  isHydratingLesson.value = true
+  activeExerciseId.value = id
+  applyMergedStarter(lesson, id)
+  isHydratingLesson.value = false
   persistDraft()
   await runCode()
 }
@@ -450,8 +537,11 @@ const onSandboxMessage = (event: MessageEvent) => {
 onMounted(() => {
   window.addEventListener('message', onSandboxMessage)
   const cached = localStorage.getItem(LAST_LESSON_KEY)
-  const normalized = cached === 'html-card' ? 'ch1-html' : cached
-  const first = lessons.find((item) => item.id === normalized) ?? lessons[0]
+  const normalized = cached ? normalizeStoredLessonId(cached) : null
+  if (cached && normalized && cached !== normalized) {
+    localStorage.setItem(LAST_LESSON_KEY, normalized)
+  }
+  const first = lessons.find((item) => item.id === (normalized ?? '')) ?? lessons[0]
   void loadLesson(first.id)
   void nextTick().then(setupSmartScrollbars)
 })
@@ -475,8 +565,21 @@ const runtimeLabelMap = {
   <div class="app-shell">
     <header class="topbar">
       <div class="topbar-left">
-        <button type="button" class="icon-btn">&lt;</button>
-        <div class="brand-mark">&lt;/&gt;</div>
+        <div class="brand-mark" aria-hidden="true">
+          <svg
+            class="brand-mark-ico"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="16 18 22 12 16 6" />
+            <polyline points="8 6 2 12 8 18" />
+          </svg>
+        </div>
         <strong class="brand-title">Averontend PlayGround</strong>
       </div>
       <nav class="topbar-nav">
@@ -686,7 +789,7 @@ const runtimeLabelMap = {
       <section class="doc-pane card">
         <div class="pane-tabs">
           <button type="button" :class="{ active: docTab === 'docs' }" @click="docTab = 'docs'">文档</button>
-          <button type="button" :class="{ active: docTab === 'guide' }" @click="docTab = 'guide'">写代码</button>
+          <button type="button" :class="{ active: docTab === 'guide' }" @click="docTab = 'guide'">练练？</button>
         </div>
 
         <header class="doc-header">
@@ -705,11 +808,39 @@ const runtimeLabelMap = {
         <section v-else class="doc-content writing-guide" data-scrollbar>
           <h3>本节写代码目标</h3>
           <p>{{ selectedLesson?.goal }}</p>
-          <h4>练习提示</h4>
-          <ul>
-            <li v-for="hint in selectedLesson?.hints ?? []" :key="hint">{{ hint }}</li>
-          </ul>
-          <p>建议先阅读左侧目录对应章节，再切到右侧代码区完成练习。</p>
+          <p v-if="!lessonNeedsSandbox" class="writing-local-notice">
+            本课练习在<strong>本机终端、Git 或本地仓库</strong>中完成，无需在右侧沙箱中写代码或点「运行」。
+          </p>
+          <template v-if="currentExercises.length">
+            <h4>练习题</h4>
+            <p v-if="lessonNeedsSandbox" class="writing-exercise-note">点击一题会载入该题起稿。若你已在右侧改过代码，切换前请留意覆盖。</p>
+            <p v-else class="writing-exercise-note">以下题目在本地或笔记中完成；无需切换右侧起稿（工程化课无必做沙箱代码）。</p>
+            <ul class="writing-exercise-list" role="list">
+              <li v-for="ex in currentExercises" :key="ex.id" role="listitem">
+                <button
+                  type="button"
+                  class="writing-exercise-item"
+                  :class="{ 'is-active': ex.id === activeExerciseId }"
+                  @click="void selectExercise(ex.id)"
+                >
+                  <span class="writing-exercise-head">
+                    <span class="writing-exercise-title">{{ ex.title }}</span>
+                    <span v-if="ex.scope === 'synthesis'" class="writing-exercise-badge">综合</span>
+                  </span>
+                  <span class="writing-exercise-concept">{{ ex.relatedConcept }}</span>
+                  <span class="writing-exercise-task">{{ ex.task }}</span>
+                </button>
+              </li>
+            </ul>
+          </template>
+          <template v-else>
+            <h4>练习提示</h4>
+            <ul>
+              <li v-for="hint in selectedLesson?.hints ?? []" :key="hint">{{ hint }}</li>
+            </ul>
+          </template>
+          <p v-if="lessonNeedsSandbox">建议先阅读「文档」与左侧目录，再切到本页选题并在右侧写代码、运行预览。</p>
+          <p v-else>建议先阅读「文档」与左侧目录，再按题目在本地跟练、自检是否达成目标。</p>
         </section>
 
         <footer class="doc-footer">
@@ -719,7 +850,7 @@ const runtimeLabelMap = {
       </section>
 
       <section class="code-pane code-pane-strict">
-        <div class="code-surface">
+        <div v-if="lessonNeedsSandbox" class="code-surface">
           <div class="code-toolbar">
             <div class="code-tabs">
               <button
@@ -756,16 +887,39 @@ const runtimeLabelMap = {
               <MonacoEditor v-model="activeCode" :language="activeEditorLanguage" />
             </div>
             <div class="hint-floating" data-scrollbar>
-              <h4>练习提示</h4>
+              <template v-if="currentExercise">
+                <p
+                  v-if="currentExercise.scope === 'synthesis'"
+                  class="hint-floating-synth"
+                >
+                  综合题：一道题覆盖多节文档内容
+                </p>
+                <h4 class="hint-floating-h">{{ currentExercise.title }}</h4>
+                <p class="hint-floating-meta">覆盖知识点：{{ currentExercise.relatedConcept }}</p>
+                <p class="hint-floating-task">{{ currentExercise.task }}</p>
+              </template>
+              <h4 class="hint-floating-h">分步提示</h4>
               <ul>
-                <li v-for="hint in selectedLesson?.hints ?? []" :key="hint">{{ hint }}</li>
+                <li
+                  v-for="h in currentExercise?.hints ?? selectedLesson?.hints ?? []"
+                  :key="h"
+                >
+                  {{ h }}
+                </li>
               </ul>
             </div>
           </div>
         </div>
+        <div v-else class="code-surface code-surface-local" data-scrollbar>
+          <p class="local-practice-kicker">工程化练习</p>
+          <p class="local-practice-title">本课无必做沙箱代码</p>
+          <p class="local-practice-text">
+            请结合左侧「文档」与「练练？」在<strong>本机</strong>完成题目；工程化题不要求在右侧编写或运行页面代码。
+          </p>
+        </div>
       </section>
 
-      <section class="preview-pane card">
+      <section v-if="lessonNeedsSandbox" class="preview-pane card">
         <header class="preview-header">
           <h3>页面预览</h3>
           <div class="status-group">
@@ -788,6 +942,13 @@ const runtimeLabelMap = {
             <button type="button" @click="consoleLogs = []">清空</button>
           </div>
           <pre data-scrollbar>{{ consoleLogs.join('\n') }}</pre>
+        </div>
+      </section>
+
+      <section v-else class="preview-pane card preview-local-placeholder">
+        <div class="preview-local-inner" data-scrollbar>
+          <h3>本地练习</h3>
+          <p>本课不展示沙箱预览与控制台。完成度在终端、Git 或编辑笔记中自测即可。</p>
         </div>
       </section>
     </main>

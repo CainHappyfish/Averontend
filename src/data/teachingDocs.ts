@@ -58,6 +58,45 @@ export const moduleDocs: Record<ModuleKey, ModuleDoc> = {
       },
     ],
   },
+  improve: {
+    module: 'improve',
+    title: 'JavaScript 提高（手撕与场景）',
+    summary: '在第一章语法之上，用面试高频与日常排障点串起语言核心概念。',
+    quickChecklist: [
+      '类型、转换、数组/对象与迭代要能说清，不靠背题。',
+      '原型、this、闭包、异步与事件循环是主线。',
+      '浅拷贝/泄漏/GC/模块差异要与工程经验对齐。',
+    ],
+    topics: [
+      {
+        title: '基础类型与隐式转换',
+        commonUsage: ['typeof / === / Object.is', 'falsy 集合', '对象 ToPrimitive 路径'],
+        exampleCode: `console.log([] == false)\nconsole.log(Number("10px"))\nNumber.isNaN(NaN)`,
+        analysis: [
+          '业务里优先用严格相等与显式转型。',
+          '对象参与运算或比较时，走规范规定的转换步骤。',
+        ],
+      },
+      {
+        title: '数组、类数组与可迭代',
+        commonUsage: ['Array.isArray', 'Array.from', '从 arguments 到 rest 参数', 'splice 副作用'],
+        exampleCode: `const like = { 0: "a", length: 1 }\nconst arr = Array.from(like)`,
+        analysis: [
+          'forEach 与 map 的返回值与可中断性不同。',
+          '会改原数组的 API 要在代码审里高亮提醒。',
+        ],
+      },
+      {
+        title: '异步组合与可观测性',
+        commonUsage: ['Promise.* 取舍', 'try/catch + await', '失败策略与可取消性'],
+        exampleCode: `const all = await Promise.allSettled([p1, p2])\nall.filter((r) => r.status === "fulfilled")`,
+        analysis: [
+          'all 与 allSettled 对应「强一致」与「分结果处理」两种业务。',
+          '未处理 rejection 要在规范与监控里当一等公民看。',
+        ],
+      },
+    ],
+  },
   engineering: {
     module: 'engineering',
     title: '前端工程化常用用法',
