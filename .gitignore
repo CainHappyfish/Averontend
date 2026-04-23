@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 sandbox-server/.data/
+deploy/averontend.env
 
 # Editor directories and files
 .vscode/*
