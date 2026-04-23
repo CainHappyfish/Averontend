@@ -1,0 +1,17 @@
+[Unit]
+Description=Averontend app server
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/Averontend
+EnvironmentFile=/opt/Averontend/deploy/averontend.env
+ExecStart=/usr/bin/env npm run start
+Restart=always
+RestartSec=3
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

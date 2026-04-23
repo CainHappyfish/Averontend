@@ -1910,7 +1910,6 @@ const runtimeLabelMap = {
             class="command-sandbox-shell"
           >
             <div class="command-sandbox-shell-head">
-              <span class="command-sandbox-shell-title">终端</span>
               <span class="command-sandbox-shell-meta">
                 {{ commandSandboxStatusLabel }}
                 <template v-if="commandSandboxWorkspace">

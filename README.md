@@ -132,6 +132,112 @@ npm run sandbox:server:once
 - 本地会话数据库位于 `sandbox-server/.data/`，已加入 `.gitignore`
 - 若 Docker 无法拉取默认镜像，可通过 `SANDBOX_IMAGE` 指定本地可用的 Node 镜像
 
+## 单机部署
+
+这套项目现在支持在一台服务器上直接部署：
+
+- `Koa` 会直接提供前端 `dist` 静态资源
+- `/api/*` 由同一个 `Koa` 进程处理
+- 命令沙箱预览通过固定端口池暴露给浏览器 iframe
+
+### 当前线上地址
+
+- 主站：`http://115.190.197.0:4273`
+- API 状态：`http://115.190.197.0:4273/api/sandbox/status`
+
+当前线上实际使用的端口：
+
+- `4273/tcp`
+- `4500-4599/tcp`
+
+### 1. 构建并启动
+
+```bash
+npm install
+npm run build
+npm run start
+```
+
+### 2. 生产环境变量
+
+建议至少配置这些环境变量：
+
+```bash
+SANDBOX_PORT=4273
+SANDBOX_BIND_HOST=0.0.0.0
+SANDBOX_PREVIEW_BIND_HOST=0.0.0.0
+SANDBOX_PREVIEW_PORT_START=4500
+SANDBOX_PREVIEW_PORT_END=4599
+SANDBOX_PREVIEW_PUBLIC_PROTO=http
+SANDBOX_PREVIEW_PUBLIC_HOST=<你的服务器公网IP或域名>
+```
+
+说明：
+
+- `SANDBOX_PORT`：主站与 API 的监听端口
+- `SANDBOX_PREVIEW_PORT_START` / `SANDBOX_PREVIEW_PORT_END`：给沙箱内 `vite dev server` 用的固定端口池
+- `SANDBOX_PREVIEW_PUBLIC_HOST`：前端 iframe 访问预览页时使用的对外地址
+
+### 3. 需要开放的端口
+
+如果你先按“单机直出 HTTP”部署，防火墙至少开放：
+
+- `4273/tcp`：主站、登录、课程文档、API
+- `4500-4599/tcp`：沙箱预览端口池
+
+如果你后面再套 `Nginx/Caddy` 做 80/443 反代：
+
+- 仍然需要把 `4500-4599/tcp` 对外放行给 iframe 访问
+- 主站只需对外开放 `80/tcp`、`443/tcp`
+- `4273/tcp` 可以只在机器内部监听，不必对公网开放
+
+### 4. systemd
+
+仓库里附了一个可改路径后直接用的 `systemd` 示例：
+
+- `deploy/averontend.service`
+- `deploy/averontend.env.example`
+
+复制后把工作目录、Node 路径、环境文件路径改成你的服务器实际值即可。
+
+### 5. 一次完整上线流程
+
+```bash
+git pull
+npm install
+npm run build
+SANDBOX_PORT=4273 \
+SANDBOX_BIND_HOST=0.0.0.0 \
+SANDBOX_PREVIEW_BIND_HOST=0.0.0.0 \
+SANDBOX_PREVIEW_PORT_START=4500 \
+SANDBOX_PREVIEW_PORT_END=4599 \
+SANDBOX_PREVIEW_PUBLIC_PROTO=http \
+SANDBOX_PREVIEW_PUBLIC_HOST=115.190.197.0 \
+npm run start
+```
+
+如果使用 `systemd`，推荐流程：
+
+```bash
+git pull
+npm install
+npm run build
+sudo cp deploy/averontend.service /etc/systemd/system/averontend.service
+sudo cp deploy/averontend.env.example /opt/Averontend/deploy/averontend.env
+sudo systemctl daemon-reload
+sudo systemctl enable --now averontend
+sudo systemctl restart averontend
+```
+
+常用排查命令：
+
+```bash
+sudo systemctl status averontend
+sudo journalctl -u averontend -n 200 --no-pager
+ss -ltnp
+docker ps
+```
+
 ## 生产构建
 
 ```bash

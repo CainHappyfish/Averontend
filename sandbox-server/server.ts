@@ -1,12 +1,15 @@
 import Router from '@koa/router'
 import Koa, { type Context, type Middleware } from 'koa'
 import bodyParser from 'koa-bodyparser'
+import serveStatic from 'koa-static'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   createAuthSession as createDbAuthSession,
   createUser as createUserRecord,
@@ -26,9 +29,19 @@ import {
   verifyUserCredentials,
 } from './auth-db.ts'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const repoRoot = path.resolve(__dirname, '..')
+const distDir = path.join(repoRoot, 'dist')
+const publicDir = path.join(repoRoot, 'public')
 const sandboxRoot = path.join(os.tmpdir(), 'averontend-command-sandbox')
 const port = Number(process.env.SANDBOX_PORT ?? 4273)
+const bindHost = process.env.SANDBOX_BIND_HOST ?? '127.0.0.1'
 const configuredImage = process.env.SANDBOX_IMAGE ?? 'node:22-bookworm'
+const previewBindHost = process.env.SANDBOX_PREVIEW_BIND_HOST ?? '127.0.0.1'
+const previewPortStart = Number(process.env.SANDBOX_PREVIEW_PORT_START ?? 4500)
+const previewPortEnd = Number(process.env.SANDBOX_PREVIEW_PORT_END ?? 4599)
+const previewPublicHost = (process.env.SANDBOX_PREVIEW_PUBLIC_HOST ?? '').trim()
+const previewPublicProto = (process.env.SANDBOX_PREVIEW_PUBLIC_PROTO ?? 'http').trim() || 'http'
 const imageFallbackCandidates = [
   configuredImage,
   'node:22-bookworm',
@@ -133,6 +146,14 @@ const shQuote = (value: string | number) => `'${String(value).replace(/'/g, `'\"
 const unique = <T>(list: T[]) => [...new Set(list.filter(Boolean))]
 const isSandboxWorkspacePath = (value: string) =>
   value === sandboxRoot || value.startsWith(`${sandboxRoot}${path.sep}`)
+const hasStaticDist = async () => {
+  try {
+    await readFile(path.join(distDir, 'index.html'), 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
 
 const runShell = (command: string, args: string[], timeoutMs = 30000) =>
   new Promise<ShellResult>((resolve, reject) => {
@@ -465,6 +486,35 @@ const resolveSandboxImage = async () => {
   }
 }
 
+const isPortAvailable = (host: string, portToCheck: number) =>
+  new Promise<boolean>((resolve) => {
+    const server = net.createServer()
+    server.once('error', () => resolve(false))
+    server.once('listening', () => {
+      server.close(() => resolve(true))
+    })
+    server.listen(portToCheck, host)
+  })
+
+const allocatePreviewPort = async () => {
+  const used = new Set([...sessions.values()].map((session) => session.forwardedPort))
+  for (let portCandidate = previewPortStart; portCandidate <= previewPortEnd; portCandidate += 1) {
+    if (used.has(portCandidate)) continue
+    if (await isPortAvailable(previewBindHost, portCandidate)) return portCandidate
+  }
+  throw httpError(503, `预览端口池已耗尽，请扩大 ${previewPortStart}-${previewPortEnd} 范围`)
+}
+
+const getPreviewUrl = (forwardedPort: number) => {
+  if (previewPublicHost) {
+    return `${previewPublicProto}://${previewPublicHost}:${forwardedPort}`
+  }
+  if (previewBindHost === '0.0.0.0') {
+    return `${previewPublicProto}://127.0.0.1:${forwardedPort}`
+  }
+  return `http://${previewBindHost}:${forwardedPort}`
+}
+
 const createSessionWorkspace = async (id: string, language: ScriptLanguage, files: SandboxFiles) => {
   await mkdir(sandboxRoot, { recursive: true })
   const workspaceDir = path.join(sandboxRoot, id)
@@ -475,6 +525,7 @@ const createSessionWorkspace = async (id: string, language: ScriptLanguage, file
 
 const createContainer = async (workspaceDir: string) => {
   const resolved = await resolveSandboxImage()
+  const previewPort = await allocatePreviewPort()
   const result = await runShell(
     'docker',
     [
@@ -489,7 +540,7 @@ const createContainer = async (workspaceDir: string) => {
       '--pids-limit',
       '256',
       '-p',
-      `127.0.0.1::${devContainerPort}`,
+      `${previewBindHost}:${previewPort}:${devContainerPort}`,
       '-v',
       `${workspaceDir}:/workspace`,
       '-w',
@@ -503,14 +554,9 @@ const createContainer = async (workspaceDir: string) => {
   if (result.code !== 0) {
     throw httpError(500, formatDockerImageError(result.stderr || result.stdout || '启动 Docker 容器失败'))
   }
-  const containerId = result.stdout.trim()
-  const portInfo = await runShell('docker', ['port', containerId, `${devContainerPort}/tcp`], 30000)
-  if (portInfo.code !== 0) throw httpError(500, portInfo.stderr || portInfo.stdout || '读取端口映射失败')
-  const match = portInfo.stdout.match(/:(\d+)/)
-  if (!match) throw httpError(500, '无法解析容器端口映射')
   return {
-    containerId,
-    forwardedPort: Number(match[1]),
+    containerId: result.stdout.trim(),
+    forwardedPort: previewPort,
     image: resolved.image,
   }
 }
@@ -886,6 +932,8 @@ app.use(async (ctx, next) => {
 })
 
 app.use(bodyParser({ jsonLimit: `${maxBodyBytes}b` }))
+app.use(serveStatic(publicDir, { index: false }))
+app.use(serveStatic(distDir, { index: false }))
 
 router.get('/api/auth/me', authOptional, (ctx) => {
   const auth = (ctx.state.auth as AuthState | undefined) ?? { user: null }
@@ -952,7 +1000,7 @@ router.post('/api/sandbox/sessions', requireAuth, async (ctx) => {
   ctx.body = {
     id: session.id,
     workspaceDir: session.workspaceDir,
-    previewUrl: `http://127.0.0.1:${session.forwardedPort}`,
+    previewUrl: getPreviewUrl(session.forwardedPort),
     image: session.image,
     labels: getEditableFileMap(language),
   }
@@ -994,7 +1042,7 @@ router.get('/api/sandbox/sessions/:id/process', requireAuth, async (ctx) => {
   const session = getOwnedSession(ctx, ctx.params.id)
   ctx.body = {
     ...(await getProcessStatus(session)),
-    previewUrl: `http://127.0.0.1:${session.forwardedPort}`,
+    previewUrl: getPreviewUrl(session.forwardedPort),
   }
 })
 
@@ -1026,7 +1074,7 @@ router.post('/api/sandbox/sessions/:id/exec', requireAuth, async (ctx) => {
         ok: true,
         background: true,
         command,
-        previewUrl: `http://127.0.0.1:${session.forwardedPort}`,
+        previewUrl: getPreviewUrl(session.forwardedPort),
       }
       return
     }
@@ -1051,10 +1099,27 @@ router.post('/api/sandbox/sessions/:id/exec', requireAuth, async (ctx) => {
 
 app.use(router.routes())
 app.use(router.allowedMethods())
+app.use(async (ctx, next) => {
+  if (ctx.method !== 'GET' && ctx.method !== 'HEAD') {
+    await next()
+    return
+  }
+  if (ctx.path.startsWith('/api/')) {
+    await next()
+    return
+  }
+  if (!(await hasStaticDist())) {
+    await next()
+    return
+  }
+  ctx.type = 'html'
+  ctx.body = await readFile(path.join(distDir, 'index.html'), 'utf8')
+})
 
-const server = app.listen(port, '127.0.0.1', () => {
-  console.log(`[sandbox-server] listening on http://127.0.0.1:${port}`)
+const server = app.listen(port, bindHost, () => {
+  console.log(`[sandbox-server] listening on http://${bindHost}:${port}`)
   console.log(`[sandbox-server] configured docker image: ${configuredImage}`)
+  console.log(`[sandbox-server] preview ports: ${previewBindHost}:${previewPortStart}-${previewPortEnd}`)
 })
 
 const gcTimer = setInterval(() => {

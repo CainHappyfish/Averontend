@@ -1714,6 +1714,7 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .code-tabs {
@@ -1725,6 +1726,11 @@ body {
   border-radius: 12px;
   background: #f8fafc;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .code-tabs button {
@@ -1769,6 +1775,7 @@ body {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex: 0 0 auto;
 }
 
 .code-btn-reset {
@@ -2301,14 +2308,8 @@ body .monaco-hover .markdown-hover,
 .command-sandbox-shell-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
-}
-
-.command-sandbox-shell-title {
-  color: #e2e8f0;
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .command-sandbox-shell-meta {
