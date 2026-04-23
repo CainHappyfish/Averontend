@@ -4,16 +4,20 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(__dirname, '..')
+const tsxBin = path.join(repoRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx')
 
-const spawnChild = (command, args) =>
+const spawnChild = (command: string, args: string[]) =>
   spawn(command, args, {
     cwd: repoRoot,
     stdio: 'inherit',
     env: process.env,
   })
 
-const sandbox = spawnChild(process.execPath, ['sandbox-server/server.mjs'])
-const vite = spawnChild('npm', ['run', 'dev:web'])
+const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+
+// 后端使用 tsx watch，修改 Koa/认证/沙箱文件后会自动重启。
+const sandbox = spawnChild(tsxBin, ['watch', '--clear-screen=false', 'sandbox-server/server.ts'])
+const vite = spawnChild(npmBin, ['run', 'dev:web'])
 
 const shutdown = (code = 0) => {
   sandbox.kill('SIGTERM')

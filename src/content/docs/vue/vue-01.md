@@ -4,8 +4,41 @@
 
 **本站对写法的要求：**
 
-- **必须**用 **Composition API** 风格：在单文件里用 **`<script setup>`**，在站内沙箱里用 **`createApp({ setup() { … }, template: … })`**，以 **`ref` / `reactive`、组合式 `computed` / `watch`、** **生命周期钩子（`onMounted` 等）** 组织逻辑。
+- **必须**用 **Composition API** 风格：在单文件里用 **`<script setup>`**，在站内与本地工程里都以 **`App.vue` + `src/main.ts`** 的方式组织代码，以 **`ref` / `reactive`、组合式 `computed` / `watch`、** **生命周期钩子（`onMounted` 等）** 组织逻辑。
 - **不要**用 **Options API**（**选项式 API**）：**不要**写 **`data()`**、**`methods`、** **选项上的 `computed` / `watch` 对象** 等 2 时代的以「配置对象」为中心的老写法（维护旧项目时可另学）。
+
+---
+
+## 先在本地装好 Vue 并跑起来
+
+如果你是第一次学 Vue，**建议优先在本地跑真实项目**，再把小片段拿到站内沙箱里验证。原因很简单：沙箱要处理 `iframe`、容器、端口转发、依赖安装等问题，偶尔会出现白屏、启动慢、预览不同步等工程噪音；**学 Vue 本身时，本地 Vite 项目更稳、更接近真实开发**。
+
+最常见的本地起步方式：
+
+```bash
+npm create vite@latest your-vue-app -- --template vue-ts
+```
+
+按提示选好项目名后，进入目录并安装依赖：
+
+```bash
+cd your-vue-app
+npm install
+```
+
+开发模式启动：
+
+```bash
+npm run dev
+```
+
+看到终端里出现类似下面的地址，就说明项目已经跑起来了：
+
+```text
+Local:   http://localhost:5173/
+```
+
+浏览器打开这个地址，就能看到你的 Vue 页面。后续本教程中的代码，推荐优先放进本地项目的 `src/App.vue`、`src/main.ts`、`src/style.css` 里练习。
 
 ---
 
@@ -19,8 +52,8 @@
 
 | 项 | 说明 |
 |----|------|
-| 运行环境 | **真沙箱**：预览在 **独立 `iframe` 子文档** 中运行（用 **Blob URL** 整页打开，而不再用 `Document#write` 注入）。`iframe` 的 **`sandbox` 只启用 `allow-scripts`、不启用 `allow-same-origin`，**子文档为**独立源**，与宿主**隔离**；子页还带有 **CSP** 收紧脚本与 `form` 等。沙箱自 **CDN** 同步拉取 **Vue 3 全量包**（含**模板**编译器），在「脚本」中写 `createApp({ setup, template })…mount('#app')` 时，运行时已预置 **`createApp` / `ref` 等**（**不必**手写 `import`）。**需能访问 unpkg 拉取 `vue.global.prod.js`**。**`npm install` / `npm run dev` 等无法**在浏览器里替代：见右侧「页面预览」上方的 **「本机终端：npm 与 Node」**，在已安装 Node 的机器上执行。 |
-| 语法 | 教学文档以 **`<script setup lang="ts">`** 为范例；站内沙箱用 **TS/JS** 写 `createApp` 的 **setup**（脚本按 **TypeScript** 去类型）。 |
+| 运行环境 | **真沙箱**：站内 Vue 练习会创建一个接近真实项目的 Vite + Vue 3 + TypeScript 环境，内部有 `src/App.vue`、`src/main.ts`、`src/style.css`，也支持在容器里执行 `npm install`、`npm run dev`。但沙箱仍可能受网络、容器启动、端口转发、`iframe` 预览等因素影响，所以**建议优先在本地 Vite 项目中跟练**。 |
+| 语法 | 教学文档以 **`<script setup lang="ts">`** 为范例；推荐把主要练习写在 `App.vue` 中，`src/main.ts` 只负责 `createApp(App).mount('#app')`。 |
 | `ref` 一词 | 可指 **`ref()` 响应式**；或模板 **`ref` 属性**（取 DOM/子组件），后文会区分。 |
 
 ---
@@ -55,6 +88,6 @@ createApp(App).mount('#app')
 - **`createApp(根).mount(节点)`** 把应用挂到页面上。
 - **声明式渲染**：描述「数据与 UI 的关系」，数据变则框架**更新 DOM**。
 
-**与练习区对应**：在沙箱里**直接**写 `createApp` 与**模板**即可看到响应式；本地工程里把同一逻辑放进 `.vue` 的 `<script setup>` 与 `<template>` 中。
+**与练习区对应**：站内练习区与本地项目一样，都会落到真实的 `App.vue` / `main.ts` / `style.css` 文件；推荐把主要逻辑写进 `.vue` 的 `<script setup>` 与 `<template>` 中。
 
 **下一节**：`vue-02` 文档会讲**模板插值与指令**；在此之前可用「练练？」巩固 `ref` 与 `template` 的配合。

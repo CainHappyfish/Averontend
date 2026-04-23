@@ -7,11 +7,11 @@ const jsImproveSandboxStarter: Lesson['starterCode'] = {
   js: `const out = document.querySelector('#output')\nconst btn = document.querySelector('#run')\n\nfunction demo() {\n  // 在此写练习代码；结果可写进 #output 或 console\n  const n = 0.1 + 0.2\n  if (out) {\n    out.textContent = \`0.1 + 0.2 = \${n}（结合文档理解浮点）\`\n  }\n}\n\nbtn?.addEventListener('click', demo)\ndemo()\n`,
 }
 
-/** Vue 子课：沙箱注入 Vue3（`createApp`、`ref` 等已预置），在「脚本」中写与文档一致的逻辑 */
+/** Vue 子课：真实 Vue 3 + TypeScript + Vite 起稿，编辑区直接对应 `App.vue` / `main.ts` / `style.css` */
 const vueLabStarter: Lesson['starterCode'] = {
-  html: `<main class="vue-lab">\n  <h2>Vue 概念练习</h2>\n  <p class="vue-lab-hint">在「脚本」中编写 <code>createApp(…).mount('#app')</code>；样式已挂在主页面，<code>#app</code> 为挂载点。</p>\n  <div id="app"></div>\n</main>`,
-  css: `body {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 24px;\n  background: #f0fdf4;\n}\n\n.vue-lab h2 {\n  margin: 0 0 8px;\n  font-size: 18px;\n  color: #0f172a;\n}\n\n.vue-lab-hint {\n  margin: 0 0 12px;\n  font-size: 13px;\n  color: #64748b;\n  line-height: 1.5;\n}\n\n#app {\n  min-height: 72px;\n  padding: 14px 16px;\n  border-radius: 10px;\n  background: #fff;\n  border: 1px solid #bbf7d0;\n  font-size: 14px;\n  color: #14532d;\n}\n\n#app a {\n  color: #15803d;\n}\n\n#app button,\nbutton {\n  margin: 4px 6px 4px 0;\n  padding: 6px 12px;\n  border: 0;\n  border-radius: 6px;\n  background: #16a34a;\n  color: #fff;\n  font-weight: 600;\n  cursor: pointer;\n}\n\ninput[type='text'] {\n  margin: 4px 8px 4px 0;\n  padding: 6px 10px;\n  border: 1px solid #86efac;\n  border-radius: 6px;\n  min-width: 180px;\n}`,
-  js: `createApp({\n  setup() {\n    const msg = ref('在 setup 与 template 中完成练习。')\n    return { msg }\n  },\n  template: '<p>{{ msg }}</p>',\n}).mount('#app')\n`,
+  html: `<template>\n  <main class="vue-lab">\n    <h2>Vue 3 + TypeScript 练习区</h2>\n    <p class="vue-lab-hint">\n      在 <code>&lt;script setup lang="ts"&gt;</code> 中编写组合式 API，模板直接消费响应式状态。\n    </p>\n\n    <section class="vue-card">\n      <p>{{ msg }}</p>\n      <div class="vue-actions">\n        <button type="button" @click="count++">点击 +1</button>\n        <span class="vue-badge">count: {{ count }}</span>\n      </div>\n    </section>\n  </main>\n</template>\n\n<script setup lang="ts">\nimport { ref } from 'vue'\n\nconst msg = ref('在真实的 App.vue 单文件组件里完成练习。')\nconst count = ref(0)\n</script>\n`,
+  css: `:root {\n  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;\n  line-height: 1.5;\n  font-weight: 400;\n  color: #0f172a;\n  background: #f0fdf4;\n}\n\n* {\n  box-sizing: border-box;\n}\n\nbody {\n  margin: 0;\n  min-width: 320px;\n  min-height: 100vh;\n  background: linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%);\n}\n\nbutton {\n  margin: 0;\n  padding: 8px 14px;\n  border: 0;\n  border-radius: 999px;\n  background: #16a34a;\n  color: #fff;\n  font-weight: 600;\n  cursor: pointer;\n}\n\nbutton:disabled {\n  cursor: not-allowed;\n  opacity: 0.6;\n}\n\ninput[type='text'],\nselect,\ntextarea {\n  padding: 8px 10px;\n  border: 1px solid #86efac;\n  border-radius: 8px;\n  background: #fff;\n}\n\n#app {\n  min-height: 100vh;\n}\n\n.vue-lab {\n  max-width: 720px;\n  margin: 0 auto;\n  padding: 40px 24px 56px;\n}\n\n.vue-lab h2 {\n  margin: 0 0 8px;\n  font-size: 24px;\n}\n\n.vue-lab-hint {\n  margin: 0 0 18px;\n  color: #475569;\n}\n\n.vue-card {\n  padding: 18px;\n  border: 1px solid #bbf7d0;\n  border-radius: 16px;\n  background: rgba(255, 255, 255, 0.92);\n  box-shadow: 0 18px 45px rgba(22, 163, 74, 0.12);\n}\n\n.vue-actions {\n  display: flex;\n  gap: 12px;\n  align-items: center;\n  flex-wrap: wrap;\n}\n\n.vue-badge {\n  display: inline-flex;\n  align-items: center;\n  min-height: 36px;\n  padding: 0 12px;\n  border-radius: 999px;\n  background: #dcfce7;\n  color: #166534;\n  font-weight: 600;\n}\n`,
+  js: `import { createApp } from 'vue'\nimport App from './App.vue'\nimport './style.css'\n\ncreateApp(App).mount('#app')\n`,
 }
 
 export const moduleNameMap: Record<Lesson['module'], string> = {
@@ -310,16 +310,16 @@ export const lessons: Lesson[] = [
     partLabel: '概念',
     level: '入门',
     title: 'Vue 3 入门、createApp 与 SFC',
-    goal: '用 `createApp` + `setup` + `ref` 与模板字符串跑通界面，与真实 `.vue` 中的组合式 API 同一套心智。',
+    goal: '用真实 `App.vue` 单文件组件与 `<script setup lang="ts">` 跑通界面，建立 Vue 3 组合式 API 的第一层心智。',
     scriptLanguage: 'vue',
     hints: [
       '更新 `ref` 后视图会跟新，无需自写 `innerHTML` 与整页 `render()`。',
-      '沙箱内可在 `createApp` 的 `template` 里写 `{{ }}`、`@click` 等，已注入含编译器的 Vue3 全量包。',
+      '把逻辑写进 `App.vue` 的 `<script setup lang="ts">`，把界面写进 `<template>`，`src/main.ts` 只负责挂载。',
     ],
     starterCode: {
-      html: `<main>\n  <h2>响应式概念演示</h2>\n  <div id="app"></div>\n</main>`,
-      css: `main {\n  max-width: 540px;\n  margin: 48px auto;\n  font-family: ui-sans-serif, system-ui;\n}\n\n#app button {\n  border: 0;\n  padding: 8px 14px;\n  border-radius: 999px;\n  background: #16a34a;\n  color: #fff;\n  cursor: pointer;\n}\n\n#app p { margin: 0 0 8px; }`,
-      js: `createApp({\n  setup() {\n    const count = ref(0)\n    return { count }\n  },\n  template: \`\n    <p>当前计数：{{ count }}</p>\n    <button type="button" @click="count++">+1</button>\n  \`,\n}).mount('#app')\n`,
+      html: `<template>\n  <main class="vue-lab">\n    <h2>响应式概念演示</h2>\n    <section class="vue-card">\n      <p>当前计数：{{ count }}</p>\n      <button type="button" @click="count++">+1</button>\n    </section>\n  </main>\n</template>\n\n<script setup lang="ts">\nimport { ref } from 'vue'\n\nconst count = ref(0)\n</script>\n`,
+      css: `:root {\n  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;\n  color: #0f172a;\n  background: #f0fdf4;\n}\n\n* {\n  box-sizing: border-box;\n}\n\nbody {\n  margin: 0;\n  min-height: 100vh;\n  background: linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%);\n}\n\n#app {\n  min-height: 100vh;\n}\n\nbutton {\n  border: 0;\n  padding: 8px 14px;\n  border-radius: 999px;\n  background: #16a34a;\n  color: #fff;\n  cursor: pointer;\n}\n\n.vue-lab {\n  max-width: 540px;\n  margin: 0 auto;\n  padding: 48px 24px;\n}\n\n.vue-card {\n  padding: 18px;\n  border-radius: 16px;\n  background: rgba(255, 255, 255, 0.92);\n  border: 1px solid #bbf7d0;\n}\n`,
+      js: `import { createApp } from 'vue'\nimport App from './App.vue'\nimport './style.css'\n\ncreateApp(App).mount('#app')\n`,
     },
   },
   {
@@ -328,7 +328,7 @@ export const lessons: Lesson[] = [
     partLabel: '模板',
     level: '入门',
     title: '模板：插值与指令',
-    goal: '在 `template` 里使用 `{{ }}`、`:`、`@`，与文档中的模板语法一一对应。',
+    goal: '在真实 `App.vue` 的 `<template>` 中使用 `{{ }}`、`:`、`@`，与文档中的模板语法一一对应。',
     scriptLanguage: 'vue',
     hints: [
       '插值即模板中的 `{{ 表达式 }}`。',
@@ -342,7 +342,7 @@ export const lessons: Lesson[] = [
     partLabel: '响应式',
     level: '基础',
     title: '响应式：ref 与 reactive',
-    goal: '在 `setup` 中练习 `ref` 与 `reactive`：改字段即可驱动模板，与文档一致。',
+    goal: '在 `<script setup lang="ts">` 中练习 `ref` 与 `reactive`：改字段即可驱动模板，与文档一致。',
     scriptLanguage: 'vue',
     hints: [
       '对象型结构优先 `reactive`；在模板里可直接用属性名（不必 `.value`）。',
@@ -370,7 +370,7 @@ export const lessons: Lesson[] = [
     partLabel: '渲染',
     level: '基础',
     title: '条件/列表、样式与事件',
-    goal: '在 `template` 里写 `v-if` / `v-show` / `v-for`、动态 `:class` 与事件修饰（如 `.prevent`）。',
+    goal: '在 `App.vue` 的模板里写 `v-if` / `v-show` / `v-for`、动态 `:class` 与事件修饰（如 `.prevent`）。',
     scriptLanguage: 'vue',
     hints: [
       '列表用稳定 `:key`（如业务 id），避免仅靠下标当身份。',

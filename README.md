@@ -1,19 +1,22 @@
 # Averontend
 
-一个面向前端教学的练习网站原型，主打 **边看文档边实操**、**实时预览反馈**。
+一个面向前端教学的练习网站原型，主打 **边看文档边实操**、**实时预览反馈**，并为工程化 / Vue 课程提供隔离命令沙箱。
 
 ## 技术栈
 
 - 前端：`Vue 3` + `TypeScript` + `Vite`
+- 后端：`Koa` + `TypeScript` + `tsx watch`
 - 编辑器：`Monaco Editor`
 - 文档渲染：`markdown-it`
 - 浏览器转译：`esbuild-wasm`（用于 TS 练习即时执行）
 - 预览沙箱：`iframe` 隔离执行 + `postMessage` 日志回传
+- 命令沙箱：`Docker` + 端口转发 + 文件同步
+- 鉴权 / 会话：`SQLite` + `httpOnly cookie`
 
 ## 当前已实现
 
 - 课程地图（HTML/CSS/JS、JavaScript 提高、工程化、TypeScript、Vue）
-- 课程级代码模板（HTML/CSS/JS）
+- 课程级代码模板（HTML/CSS/JS）与 Vue 3 + TypeScript 项目起稿
 - 左侧教学区整块切换：
   - `教学文档`：读取本地 `.md` 文件并渲染
   - `写代码`：展示提示、代码标签页与编辑器
@@ -21,10 +24,21 @@
 - 控制台输出面板（log/warn/error/info）
 - 代码草稿本地持久化（刷新不丢）
 - 记住上次学习课程
+- 登录 / 注册
+- 一个用户只绑定一个沙箱会话
+- 沙箱空闲超时后自动销毁
+- Vue 课程可在沙箱内执行 `npm run dev`
+- Koa 沙箱服务支持热更新
 
 ## 项目结构
 
 ```text
+public/
+  favicon.jpg
+sandbox-server/
+  auth-db.ts
+  dev.ts
+  server.ts
 src/
   components/
     MonacoEditor.vue
@@ -90,16 +104,37 @@ npm install
 npm run dev
 ```
 
+`npm run dev` 会同时启动：
+
+- `Vite` 前端开发服务器
+- `Koa` 沙箱服务（通过 `tsx watch` 热更新）
+
+如果只想单独启动沙箱服务：
+
+```bash
+npm run sandbox:server
+```
+
+如果只想启动一次、不监听后端改动：
+
+```bash
+npm run sandbox:server:once
+```
+
+## 环境要求
+
+- `Node.js 22+`
+- `Docker`
+
+说明：
+
+- Vue 课程的命令沙箱依赖 Docker 容器内执行 `npm install` / `npm run dev`
+- 本地会话数据库位于 `sandbox-server/.data/`，已加入 `.gitignore`
+- 若 Docker 无法拉取默认镜像，可通过 `SANDBOX_IMAGE` 指定本地可用的 Node 镜像
+
 ## 生产构建
 
 ```bash
 npm run build
 npm run preview
 ```
-
-## 下一步建议
-
-- 文档目录导航（自动提取 h2/h3 生成锚点）
-- 示例代码“一键插入编辑器”
-- 练习自动判题（测试用例 + 结果反馈）
-- Vue SFC 在线运行链路（`template/script/style`）

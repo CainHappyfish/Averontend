@@ -44,12 +44,23 @@ export const getVue3RuntimePreamble = (): string => {
 }
 
 /**
- * 宽松 `any` 以匹配 CDN 全量 UMD，不依赖 `node_modules/vue` 的声明解析
- * （Monaco 独立 TS 语言服务不解析本仓库的 `vue` 包。）
+ * 仍保留全局声明以兼容旧的 iframe 运行时；同时补一份宽松 module 声明，
+ * 让 Monaco 在 `src/main.ts` 里写 `import { createApp } from 'vue'`
+ * 以及 `import App from './App.vue'` 时不再报模块找不到。
  */
 export const getVueInjectedMonacoExtraLibDts = (): string =>
   [
-    '/** 预览 iframe 注入，仅用于编辑器中消除未声明全局误报（无 import/export 的全局声明文件） */',
-    "declare const Vue: any;",
+    '/** 兼容旧沙箱与真实 Vue + TS 编辑体验的宽松声明文件 */',
+    'declare module "*.vue" {',
+    '  const component: any',
+    '  export default component',
+    '}',
+    "declare module 'vue' {",
+    '  export type DefineComponent = any',
+    ...VUE_INJECTED_GLOBAL_IDENTIFIERS.map((id) => `  export const ${id}: any`),
+    '  const Vue: any',
+    '  export default Vue',
+    '}',
+    'declare const Vue: any;',
     ...VUE_INJECTED_GLOBAL_IDENTIFIERS.map((id) => `declare const ${id}: any;`),
   ].join('\n')

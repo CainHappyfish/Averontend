@@ -768,9 +768,9 @@ export const lessonExercisesByLessonId: Record<string, LessonExercise[]> = {
       id: 'vue06-2',
       title: '子组件 + emit',
       relatedConcept: 'props 与 emit',
-      task: '用 `defineComponent` 写子组件，**根逻辑在 `setup()` 中**；声明 `props` 与 `emits`，在 `setup` 里返回模板要用到的项；`template` 里按钮 `emit(\'bump\')`；**不要** 使用 `data()` / `methods`（选项式）。父根在 `@bump` 里改 `msg`。',
+      task: '在 `App.vue` 的 `<script setup lang="ts">` 中用 `defineComponent` 写子组件，**子组件逻辑在 `setup()` 中**；声明 `props` 与 `emits`，在 `setup` 里返回模板要用到的项；`template` 里按钮 `emit(\'bump\')`；**不要** 使用 `data()` / `methods`（选项式）。父根在 `@bump` 里改 `msg`。',
       hints: [
-        '无 SFC 时，子组件写在与 `createApp` 同一份脚本中即可；`props`/`emits` 可与 `setup` 同写在 `defineComponent` 选项里，仍属 Composition API。',
+        '真实项目里常见写法是在同一个 `App.vue` 中先声明局部子组件，再在模板里使用；`props`/`emits` 与 `setup` 同写在 `defineComponent` 选项里，仍属 Composition API。',
       ],
     },
     {
@@ -819,7 +819,7 @@ export const lessonExercisesByLessonId: Record<string, LessonExercise[]> = {
       id: 'vue08-1',
       title: 'provide / inject',
       relatedConcept: '依赖注入',
-      task: `在根 createApp 的 setup 里 使用 provide('theme', themeRef)、子组件用 inject 取并切换；key 可先用 string，生产环境建议 Symbol。`,
+      task: `在根组件的 <script setup> 里使用 provide('theme', themeRef)、子组件用 inject 取并切换；key 可先用 string，生产环境建议 Symbol。`,
       hints: [
         '与把状态塞在「模块级变量」里比，`provide`/`inject` 更贴子树传配置的心智。',
       ],

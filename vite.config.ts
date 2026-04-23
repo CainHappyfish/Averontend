@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     proxy: {
-      '/api/sandbox': {
+      '/api': {
         target: 'http://127.0.0.1:4273',
         changeOrigin: true,
       },
@@ -14,7 +14,7 @@ export default defineConfig({
   },
   preview: {
     proxy: {
-      '/api/sandbox': {
+      '/api': {
         target: 'http://127.0.0.1:4273',
         changeOrigin: true,
       },

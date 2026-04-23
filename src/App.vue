@@ -16,6 +16,7 @@ import { getDocMarkdown, getDocSectionCountForLesson } from './data/moduleDocMar
 import type { Lesson, ModuleKey } from './types/lesson'
 import { buildSandboxDocument, type SandboxRuntime } from './sandbox/buildSandboxDocument'
 import { transpileScript } from './sandbox/transpileScript'
+import brandIcon from './assets/92F89723448B3C975E4F2FC459334AF8.jpg'
 
 type EditorTab = 'html' | 'css' | 'js'
 type DocTab = 'docs' | 'guide'
@@ -34,18 +35,109 @@ interface LessonDraft {
   js: string
 }
 
-type CommandSandboxState = 'offline' | 'ready' | 'running' | 'error'
+type ConsoleEntryLevel = 'system' | 'log' | 'warn' | 'error' | 'info'
 
-interface CommandSandboxExecResult {
-  command: string
-  exitCode: number
-  signal: string | null
-  stdout: string
-  stderr: string
-  timedOut: boolean
-  elapsedMs: number
-  workspaceDir: string
+interface ConsoleEntry {
+  level: ConsoleEntryLevel
+  label: string
+  message: string
 }
+
+type SearchResultType = 'lesson' | 'heading'
+
+interface SearchResultItem {
+  key: string
+  type: SearchResultType
+  title: string
+  subtitle: string
+  lessonId: string
+  headingId?: string
+  score: number
+}
+
+interface AuthUser {
+  id: string
+  username: string
+  createdAt: number
+}
+
+const ANSI_ESCAPE_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
+
+const stripAnsi = (value: string) => value.replace(ANSI_ESCAPE_RE, '').replace(/\u0007/g, '')
+
+const normalizeTerminalLine = (rawLine: string) => {
+  const cleanLine = stripAnsi(rawLine).replace(/\s+$/, '')
+  const trimmed = cleanLine.trim()
+  if (!trimmed || trimmed === '$') return ''
+
+  const compact = trimmed.replace(/\s+/g, ' ')
+  const viteReady = compact.match(/^VITE\s+v([^\s]+)\s+ready in\s+(\d+)\s*ms$/i)
+  if (viteReady) {
+    return `[vite] v${viteReady[1]} ready · ${viteReady[2]} ms`
+  }
+  if (/^➜\s*Local:/i.test(compact) || /^Local:/i.test(compact)) {
+    return `[vite] Local: ${compact.replace(/^➜\s*Local:\s*/i, '')}`
+  }
+  if (/^➜\s*Network:/i.test(compact) || /^Network:/i.test(compact)) {
+    return `[vite] Network: ${compact.replace(/^➜\s*Network:\s*/i, '')}`
+  }
+  const npmScript = compact.match(/^>\s+(.+)$/)
+  if (npmScript) {
+    const content = npmScript[1].trim()
+    if (/^[\w.-]+@[\d.]+\s+\S+/i.test(content)) return `[npm] ${content}`
+    if (/^(vite|npm|pnpm|yarn|bun)\b/i.test(content)) return `[cmd] ${content}`
+    return `> ${content}`
+  }
+
+  return cleanLine
+}
+
+const formatTerminalOutput = (source: string) => {
+  const lines = source.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  const normalized: string[] = []
+  for (const line of lines) {
+    const nextLine = normalizeTerminalLine(line)
+    if (!nextLine) {
+      if (normalized[normalized.length - 1] !== '') normalized.push('')
+      continue
+    }
+    normalized.push(nextLine)
+  }
+  while (normalized[0] === '') normalized.shift()
+  while (normalized[normalized.length - 1] === '') normalized.pop()
+  return normalized.join('\n')
+}
+
+const inferPreviewReadyFromLog = (log: string | undefined) =>
+  /\bready in\s+\d+\s*ms\b/i.test(stripAnsi(log ?? ''))
+
+const parseConsoleEntry = (raw: string): ConsoleEntry => {
+  const clean = stripAnsi(raw).trim()
+  const match = clean.match(/^\[(system|log|warn|error|info)\s*\]\s*(.*)$/i)
+  if (!match) {
+    return {
+      level: 'log',
+      label: 'LOG',
+      message: clean || raw,
+    }
+  }
+
+  const rawLevel = match[1].toLowerCase() as ConsoleEntryLevel
+  return {
+    level: rawLevel,
+    label: rawLevel === 'system' ? 'SYSTEM' : rawLevel.toUpperCase(),
+    message: match[2] || '',
+  }
+}
+
+const authUser = ref<AuthUser | null>(null)
+const authLoading = ref(true)
+const authBusy = ref(false)
+const authMode = ref<'login' | 'register'>('login')
+const authUsername = ref('')
+const authPassword = ref('')
+const authError = ref('')
+const appBootstrapped = ref(false)
 
 const selectedLessonId = ref(lessons[0]?.id ?? '')
 const docTab = ref<DocTab>('docs')
@@ -55,6 +147,8 @@ const cssCode = ref('')
 const jsCode = ref('')
 const previewDoc = ref('')
 const previewFrame = ref<HTMLIFrameElement | null>(null)
+const terminalOutputRef = ref<HTMLElement | null>(null)
+const previewFrameLoading = ref(false)
 /** 沙箱以 Blob URL 独立导航，换稿时释放上一 URL 避免泄露 */
 let sandboxBlobUrl: string | null = null
 const docsContainerRef = ref<HTMLElement | null>(null)
@@ -64,40 +158,119 @@ const autoRunEnabled = ref(true)
 const isHydratingLesson = ref(false)
 const cleanTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const activeExerciseId = ref('')
+const outputPanelTab = ref<'terminal' | 'console'>('terminal')
+const previewExternalUrl = ref('')
+const commandSandboxPreviewUrl = ref('')
+const commandSandboxPreviewReady = ref(false)
+const previewFrameTarget = ref('')
+const searchQuery = ref('')
+const searchPanelOpen = ref(false)
+const searchBoxRef = ref<HTMLElement | null>(null)
+let sandboxFileSyncTimer: ReturnType<typeof setTimeout> | null = null
+let sandboxProcessPollTimer: ReturnType<typeof setTimeout> | null = null
 
-/** 与仓库根 package.json 中的脚本一致，供在「本机终端」复现完整 npm 工作流 */
-const localNpmCommands =
-  'cd Averontend\nnpm install\nnpm run dev\n'
-const copyNpmHint = ref(false)
-const copyLocalNpmCommands = async () => {
-  try {
-    await navigator.clipboard.writeText(localNpmCommands)
-    copyNpmHint.value = true
-    window.setTimeout(() => {
-      copyNpmHint.value = false
-    }, 2200)
-  } catch {
-    console.warn('[Averontend] 无法写入剪贴板，请手选终端命令')
-  }
+type CommandSandboxState = 'offline' | 'ready' | 'running' | 'error'
+interface CommandSandboxExecResult {
+  command: string
+  exitCode: number
+  signal: string | null
+  stdout: string
+  stderr: string
+  timedOut: boolean
+  elapsedMs: number
+  workspaceDir: string
+  files: LessonDraft
 }
 
 const commandSandboxState = ref<CommandSandboxState>('offline')
 const commandSandboxSessionId = ref('')
 const commandSandboxWorkspace = ref('')
-const commandSandboxCommand = ref('npm run build')
-const commandSandboxOutput = ref('命令输出会显示在这里。')
+const commandSandboxCommand = ref('')
+const commandSandboxOutput = ref('终端输出会显示在这里。')
 const commandSandboxError = ref('')
 const commandSandboxBusy = ref(false)
+const commandSandboxProcessRunning = ref(false)
+const commandSandboxLastProcessLog = ref('')
 
 const commandSandboxStatusLabel = computed(() => {
   if (commandSandboxState.value === 'running') return '执行中'
-  if (commandSandboxState.value === 'ready') return commandSandboxSessionId.value ? '已就绪' : '服务在线'
   if (commandSandboxState.value === 'error') return '命令失败'
-  return '服务离线'
+  if (commandSandboxSessionId.value) return commandSandboxProcessRunning.value ? '会话在线 · 开发服务运行中' : '会话在线'
+  return commandSandboxState.value === 'offline' ? '服务离线' : '服务在线'
 })
+
+const previewLoading = computed(
+  () =>
+    previewFrameLoading.value ||
+    (!!previewExternalUrl.value &&
+      commandSandboxProcessRunning.value &&
+      !commandSandboxPreviewReady.value),
+)
+
+const previewLoadingText = computed(() =>
+  selectedLesson.value?.scriptLanguage === 'vue'
+    ? '预览加载中，正在等待 Vue 开发服务响应...'
+    : '预览加载中...',
+)
+
+const terminalOutputDisplay = computed(() => formatTerminalOutput(commandSandboxOutput.value))
+
+const consoleEntries = computed(() => consoleLogs.value.map(parseConsoleEntry))
+
+const currentExercises = computed(() =>
+  selectedLesson.value ? getLessonExercises(selectedLesson.value.id) : [],
+)
+
+const currentExercise = computed(() => {
+  const list = currentExercises.value
+  if (!list.length) return null
+  return list.find((e) => e.id === activeExerciseId.value) ?? list[0] ?? null
+})
+
+const editorFileLabels = computed(() => ({
+  html: selectedLesson.value?.scriptLanguage === 'vue' ? 'src/App.vue' : 'index.html',
+  css: 'src/style.css',
+  js:
+    selectedLesson.value?.scriptLanguage === 'typescript'
+      ? 'src/main.ts'
+      : selectedLesson.value?.scriptLanguage === 'vue'
+        ? 'src/main.ts'
+        : 'src/main.js',
+}))
+
+const currentSandboxFiles = (): LessonDraft => ({
+  html: htmlCode.value,
+  css: cssCode.value,
+  js: jsCode.value,
+})
+
+const scrollTerminalToBottom = async () => {
+  await nextTick()
+  terminalOutputRef.value?.scrollTo({
+    top: terminalOutputRef.value.scrollHeight,
+    behavior: 'smooth',
+  })
+}
+
+const appendTerminalOutput = async (chunk: string) => {
+  const text = chunk.trimEnd()
+  if (!text) return
+  commandSandboxOutput.value =
+    commandSandboxOutput.value.trim() === ''
+      ? text
+      : `${commandSandboxOutput.value.replace(/\s*$/, '')}\n${text}`
+  await scrollTerminalToBottom()
+}
+
+const applySandboxFilesToEditors = (files: Partial<LessonDraft>) => {
+  if (typeof files.html === 'string') htmlCode.value = files.html
+  if (typeof files.css === 'string') cssCode.value = files.css
+  if (typeof files.js === 'string') jsCode.value = files.js
+}
 
 const sandboxFetch = async <T>(input: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(input, {
+    credentials: 'same-origin',
     ...init,
     headers: {
       'Content-Type': 'application/json',
@@ -111,114 +284,10 @@ const sandboxFetch = async <T>(input: string, init?: RequestInit): Promise<T> =>
   return payload as T
 }
 
-const probeCommandSandbox = async () => {
-  try {
-    await sandboxFetch<{ ok: boolean }>('/api/sandbox/status', { method: 'GET' })
-    commandSandboxState.value = commandSandboxSessionId.value ? 'ready' : 'ready'
-    commandSandboxError.value = ''
-    if (!commandSandboxSessionId.value) {
-      commandSandboxOutput.value = '命令沙箱在线。输入命令后可直接“初始化并执行”。'
-    }
-  } catch (error) {
-    commandSandboxState.value = 'offline'
-    commandSandboxError.value = error instanceof Error ? error.message : String(error)
-    commandSandboxOutput.value =
-      '命令沙箱服务未启动。请使用 `npm run dev`（已同时启动前端与 sandbox-server），或单独执行 `npm run sandbox:server`。'
-  }
-}
-
-const destroyCommandSandboxSession = async () => {
-  if (!commandSandboxSessionId.value) return
-  const id = commandSandboxSessionId.value
-  commandSandboxSessionId.value = ''
-  commandSandboxWorkspace.value = ''
-  try {
-    await sandboxFetch<{ ok: boolean }>(`/api/sandbox/sessions/${id}`, { method: 'DELETE' })
-  } catch {
-    // 页面关闭或 dev server 退出时无需阻塞卸载流程
-  }
-}
-
-const ensureCommandSandboxSession = async () => {
-  if (commandSandboxSessionId.value) return
-  const data = await sandboxFetch<{ id: string; workspaceDir: string }>('/api/sandbox/sessions', {
-    method: 'POST',
-    body: JSON.stringify({}),
-  })
-  commandSandboxSessionId.value = data.id
-  commandSandboxWorkspace.value = data.workspaceDir
-  commandSandboxState.value = 'ready'
-  commandSandboxError.value = ''
-}
-
-const resetCommandSandboxSession = async () => {
-  commandSandboxBusy.value = true
-  commandSandboxError.value = ''
-  try {
-    await destroyCommandSandboxSession()
-    await ensureCommandSandboxSession()
-    commandSandboxOutput.value = '已重置 Docker 命令沙箱，会话工作区为当前仓库的一份隔离拷贝。'
-  } catch (error) {
-    commandSandboxState.value = 'offline'
-    commandSandboxError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    commandSandboxBusy.value = false
-  }
-}
-
-const runCommandInSandbox = async () => {
-  const command = commandSandboxCommand.value.trim()
-  if (!command) return
-  commandSandboxBusy.value = true
-  commandSandboxError.value = ''
-  commandSandboxState.value = 'running'
-  commandSandboxOutput.value = `$ ${command}\n\n[system] Docker 命令沙箱执行中...`
-  try {
-    await ensureCommandSandboxSession()
-    const result = await sandboxFetch<CommandSandboxExecResult>(
-      `/api/sandbox/sessions/${commandSandboxSessionId.value}/exec`,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          command,
-          timeoutMs: 120000,
-        }),
-      },
-    )
-    commandSandboxWorkspace.value = result.workspaceDir
-    commandSandboxState.value = result.exitCode === 0 ? 'ready' : 'error'
-    commandSandboxOutput.value = [
-      `$ ${result.command}`,
-      '',
-      result.stdout.trimEnd(),
-      result.stderr.trimEnd(),
-      `[exit ${result.exitCode}] ${result.elapsedMs} ms${result.timedOut ? '（超时已终止）' : ''}`,
-    ]
-      .filter(Boolean)
-      .join('\n')
-  } catch (error) {
-    commandSandboxState.value = 'error'
-    commandSandboxError.value = error instanceof Error ? error.message : String(error)
-    commandSandboxOutput.value = [
-      `$ ${command}`,
-      '',
-      '[ERROR] 命令沙箱执行失败。',
-      commandSandboxError.value,
-    ].join('\n')
-  } finally {
-    commandSandboxBusy.value = false
-  }
-}
-
-const currentExercises = computed(() =>
-  selectedLesson.value ? getLessonExercises(selectedLesson.value.id) : [],
+const authActionLabel = computed(() => (authMode.value === 'login' ? '登录' : '注册'))
+const authSwitchLabel = computed(() =>
+  authMode.value === 'login' ? '没有账号？去注册' : '已有账号？去登录',
 )
-
-const currentExercise = computed(() => {
-  const list = currentExercises.value
-  if (!list.length) return null
-  return list.find((e) => e.id === activeExerciseId.value) ?? list[0] ?? null
-})
 
 const DRAFT_STORAGE_KEY = 'averontend:lesson-drafts'
 const LAST_LESSON_KEY = 'averontend:last-lesson-id'
@@ -337,6 +406,30 @@ const slugify = (text: string) =>
     .replace(/[^\w\u4e00-\u9fa5\s-]/g, '')
     .replace(/\s+/g, '-')
 
+const normalizeForSearch = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^\w\u4e00-\u9fa5]+/g, '')
+    .trim()
+
+const isSubsequence = (needle: string, haystack: string) => {
+  if (!needle || !haystack) return false
+  let i = 0
+  let j = 0
+  while (i < needle.length && j < haystack.length) {
+    if (needle[i] === haystack[j]) i += 1
+    j += 1
+  }
+  return i === needle.length
+}
+
+const calcFuzzyScore = (query: string, target: string) => {
+  if (!query || !target) return 0
+  if (target.includes(query)) return 120 - Math.min(target.indexOf(query), 80)
+  if (isSubsequence(query, target)) return 70 - Math.max(target.length - query.length, 0)
+  return 0
+}
+
 let headingSlugMap = new Map<string, number>()
 markdown.renderer.rules.heading_open = (tokens, idx, options, _env, self) => {
   const next = tokens[idx + 1]
@@ -379,6 +472,71 @@ const docHtml = computed(() => {
   return markdown.render(rawDoc.value)
 })
 const docHeadings = computed(() => extractHeadings(rawDoc.value))
+const lessonSearchSource = computed(() =>
+  lessons.map((lesson) => {
+    const moduleLabel = moduleNameMap[lesson.module]
+    const keywords = [lesson.title, moduleLabel, lesson.goal, ...(lesson.hints ?? []), lesson.id].join(' ')
+    return {
+      lessonId: lesson.id,
+      title: lesson.title,
+      subtitle: `${moduleLabel} · 课程`,
+      normalizedKeywords: normalizeForSearch(keywords),
+    }
+  }),
+)
+const headingSearchSource = computed(() =>
+  lessons.flatMap((lesson) => {
+    const moduleLabel = moduleNameMap[lesson.module]
+    const lessonTitle = lesson.title
+    const lessonTitleNormalized = normalizeForSearch(lessonTitle)
+    return extractHeadings(getDocMarkdown(lesson)).map((heading) => ({
+      key: `${lesson.id}:${heading.id}`,
+      lessonId: lesson.id,
+      headingId: heading.id,
+      title: heading.text,
+      subtitle: `${moduleLabel} · ${lessonTitle}`,
+      normalizedHeading: normalizeForSearch(heading.text),
+      normalizedLessonTitle: lessonTitleNormalized,
+    }))
+  }),
+)
+const searchResults = computed<SearchResultItem[]>(() => {
+  const normalizedQuery = normalizeForSearch(searchQuery.value)
+  if (!normalizedQuery) return []
+  const lessonResults: SearchResultItem[] = lessonSearchSource.value
+    .map((item) => {
+      const score = calcFuzzyScore(normalizedQuery, item.normalizedKeywords)
+      if (score <= 0) return null
+      return {
+        key: `lesson:${item.lessonId}`,
+        type: 'lesson',
+        title: item.title,
+        subtitle: item.subtitle,
+        lessonId: item.lessonId,
+        score,
+      } as SearchResultItem
+    })
+    .filter((item): item is SearchResultItem => Boolean(item))
+  const headingResults: SearchResultItem[] = headingSearchSource.value
+    .map((item) => {
+      const headingScore = calcFuzzyScore(normalizedQuery, item.normalizedHeading)
+      const lessonScore = calcFuzzyScore(normalizedQuery, item.normalizedLessonTitle)
+      const score = Math.max(headingScore + 8, lessonScore)
+      if (score <= 0) return null
+      return {
+        key: `heading:${item.key}`,
+        type: 'heading',
+        title: item.title,
+        subtitle: `${item.subtitle} · 文档小节`,
+        lessonId: item.lessonId,
+        headingId: item.headingId,
+        score,
+      } as SearchResultItem
+    })
+    .filter((item): item is SearchResultItem => Boolean(item))
+  return [...lessonResults, ...headingResults].sort((a, b) => b.score - a.score).slice(0, 10)
+})
+const showSearchPanel = computed(() => searchPanelOpen.value && searchQuery.value.trim().length > 0)
 
 const ch1Lessons = computed(() => getCh1Lessons())
 
@@ -479,15 +637,416 @@ const readDrafts = (): Record<string, LessonDraft> => {
   }
 }
 
+const writeDrafts = (drafts: Record<string, LessonDraft>) => {
+  localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts))
+}
+
+const isVueSfcDraft = (code: string) =>
+  /<template[\s>]/.test(code) &&
+  /<\/template>/.test(code) &&
+  /<script setup(?:\s+lang=["']ts["'])?/.test(code)
+
+const isVueMainDraft = (code: string) =>
+  /import\s+App\s+from\s+['"]\.\/App\.vue['"]/.test(code) &&
+  /createApp\s*\(\s*App\s*\)\.mount\(\s*['"]#app['"]\s*\)/.test(code)
+
+const takeCompatibleDraft = (lesson: Lesson): LessonDraft | null => {
+  const drafts = readDrafts()
+  const draft = drafts[lesson.id]
+  if (!draft) return null
+  if (lesson.scriptLanguage !== 'vue') return draft
+  if (isVueSfcDraft(draft.html) && isVueMainDraft(draft.js)) return draft
+  delete drafts[lesson.id]
+  writeDrafts(drafts)
+  return null
+}
+
 const persistDraft = () => {
   const lessonId = selectedLessonId.value
   if (!lessonId) return
   const drafts = readDrafts()
   drafts[lessonId] = { html: htmlCode.value, css: cssCode.value, js: jsCode.value }
-  localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts))
+  writeDrafts(drafts)
+}
+
+const setPreviewFrameToUrl = async (url: string) => {
+  await nextTick()
+  const frame = previewFrame.value
+  if (!frame) return
+  if (previewFrameTarget.value === url) return
+  const prev = sandboxBlobUrl
+  previewFrameLoading.value = true
+  previewFrameTarget.value = url
+  frame.setAttribute('src', url)
+  if (prev) {
+    URL.revokeObjectURL(prev)
+    sandboxBlobUrl = null
+  }
+}
+
+const resetPreviewFrame = async () => {
+  await nextTick()
+  const frame = previewFrame.value
+  const prev = sandboxBlobUrl
+  previewExternalUrl.value = ''
+  previewFrameTarget.value = ''
+  previewFrameLoading.value = false
+  if (frame) frame.setAttribute('src', 'about:blank')
+  if (prev) {
+    URL.revokeObjectURL(prev)
+    sandboxBlobUrl = null
+  }
+}
+
+const getInitialLessonId = () => {
+  const cached = localStorage.getItem(LAST_LESSON_KEY)
+  const normalized = cached ? normalizeStoredLessonId(cached) : null
+  if (cached && normalized && cached !== normalized) {
+    localStorage.setItem(LAST_LESSON_KEY, normalized)
+  }
+  return (lessons.find((item) => item.id === (normalized ?? '')) ?? lessons[0]).id
+}
+
+const initializeAuthedApp = async () => {
+  if (appBootstrapped.value) return
+  await probeCommandSandbox()
+  await loadLesson(getInitialLessonId())
+  await nextTick()
+  setupSmartScrollbars()
+  appBootstrapped.value = true
+}
+
+const refreshAuthState = async () => {
+  try {
+    const payload = await sandboxFetch<{ authenticated: boolean; user?: AuthUser }>('/api/auth/me', {
+      method: 'GET',
+    })
+    authUser.value = payload.authenticated ? payload.user ?? null : null
+  } catch {
+    authUser.value = null
+  }
+}
+
+const submitAuth = async () => {
+  const username = authUsername.value.trim()
+  const password = authPassword.value
+  if (!username || !password) {
+    authError.value = '请输入用户名和密码'
+    return
+  }
+  authBusy.value = true
+  authError.value = ''
+  try {
+    const payload = await sandboxFetch<{ ok: boolean; user: AuthUser }>(
+      authMode.value === 'login' ? '/api/auth/login' : '/api/auth/register',
+      {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      },
+    )
+    authUser.value = payload.user
+    authPassword.value = ''
+    appBootstrapped.value = false
+    await initializeAuthedApp()
+  } catch (error) {
+    authError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    authBusy.value = false
+  }
+}
+
+const toggleAuthMode = () => {
+  authMode.value = authMode.value === 'login' ? 'register' : 'login'
+  authError.value = ''
+}
+
+const logout = async () => {
+  authBusy.value = true
+  try {
+    await destroyCommandSandboxSession()
+    await sandboxFetch<{ ok: boolean }>('/api/auth/logout', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+  } catch {
+    // ignore on logout
+  } finally {
+    authBusy.value = false
+  }
+  authUser.value = null
+  authPassword.value = ''
+  authError.value = ''
+  appBootstrapped.value = false
+  commandSandboxState.value = 'ready'
+  commandSandboxOutput.value = '终端输出会显示在这里。'
+  commandSandboxError.value = ''
+  consoleLogs.value = []
+  runtimeState.value = 'idle'
+}
+
+const stopCommandSandboxPolling = () => {
+  if (!sandboxProcessPollTimer) return
+  clearTimeout(sandboxProcessPollTimer)
+  sandboxProcessPollTimer = null
+}
+
+const probeCommandSandbox = async () => {
+  try {
+    await sandboxFetch<{ ok: boolean }>('/api/sandbox/status', { method: 'GET' })
+    commandSandboxState.value = commandSandboxSessionId.value ? commandSandboxState.value : 'ready'
+    if (!commandSandboxSessionId.value && commandSandboxOutput.value === '终端输出会显示在这里。') {
+      commandSandboxOutput.value =
+        'Averontend terminal ready.\n输入命令后会自动初始化隔离容器。\n内置命令：clear / reset / stop'
+    }
+    commandSandboxError.value = ''
+  } catch (error) {
+    commandSandboxState.value = 'offline'
+    commandSandboxError.value = error instanceof Error ? error.message : String(error)
+    commandSandboxOutput.value =
+      '命令沙箱服务未启动。请使用 `npm run dev`（会同时启动前端与 sandbox-server），或单独执行 `npm run sandbox:server`。'
+  }
+}
+
+const destroyCommandSandboxSession = async () => {
+  stopCommandSandboxPolling()
+  if (!commandSandboxSessionId.value) return
+  const id = commandSandboxSessionId.value
+  commandSandboxSessionId.value = ''
+  commandSandboxWorkspace.value = ''
+  commandSandboxProcessRunning.value = false
+  commandSandboxPreviewUrl.value = ''
+  commandSandboxPreviewReady.value = false
+  await resetPreviewFrame()
+  try {
+    await sandboxFetch<{ ok: boolean }>(`/api/sandbox/sessions/${id}`, { method: 'DELETE' })
+  } catch {
+    // ignore on teardown
+  }
+}
+
+const ensureCommandSandboxSession = async () => {
+  if (commandSandboxSessionId.value) return
+  const lang = selectedLesson.value?.scriptLanguage ?? 'javascript'
+  if (lang === 'vue') {
+    await appendTerminalOutput('[system] 正在初始化 Vue 会话并安装依赖，请稍候...')
+  }
+  const data = await sandboxFetch<{
+    id: string
+    workspaceDir: string
+    previewUrl: string
+  }>('/api/sandbox/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      language: lang,
+      files: currentSandboxFiles(),
+    }),
+  })
+  commandSandboxSessionId.value = data.id
+  commandSandboxWorkspace.value = data.workspaceDir
+  commandSandboxPreviewUrl.value = data.previewUrl
+  commandSandboxPreviewReady.value = false
+  commandSandboxState.value = 'ready'
+  commandSandboxError.value = ''
+  commandSandboxLastProcessLog.value = ''
+  await appendTerminalOutput(`[system] 会话已初始化：${data.workspaceDir}`)
+}
+
+const syncSandboxFiles = async () => {
+  if (!commandSandboxSessionId.value) return
+  const lang = selectedLesson.value?.scriptLanguage ?? 'javascript'
+  await sandboxFetch<{ ok: boolean }>(`/api/sandbox/sessions/${commandSandboxSessionId.value}/files`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      language: lang,
+      files: currentSandboxFiles(),
+    }),
+  })
+}
+
+const scheduleSandboxFileSync = () => {
+  if (!commandSandboxSessionId.value || isHydratingLesson.value || commandSandboxBusy.value) return
+  if (sandboxFileSyncTimer) clearTimeout(sandboxFileSyncTimer)
+  sandboxFileSyncTimer = setTimeout(() => {
+    void syncSandboxFiles().catch((error) => {
+      commandSandboxError.value = error instanceof Error ? error.message : String(error)
+      commandSandboxState.value = 'error'
+    })
+  }, 420)
+}
+
+const syncSandboxFilesFromSession = async () => {
+  if (!commandSandboxSessionId.value) return
+  const data = await sandboxFetch<{ files: LessonDraft }>(
+    `/api/sandbox/sessions/${commandSandboxSessionId.value}/files`,
+    { method: 'GET' },
+  )
+  applySandboxFilesToEditors(data.files)
+}
+
+const pollCommandSandboxProcess = async () => {
+  if (!commandSandboxSessionId.value) return
+  try {
+    const data = await sandboxFetch<{
+      running: boolean
+      log: string
+      exitCode: string
+      previewUrl: string
+      previewReady?: boolean
+    }>(`/api/sandbox/sessions/${commandSandboxSessionId.value}/process`, { method: 'GET' })
+    commandSandboxProcessRunning.value = data.running
+    const nextLog = data.log ?? ''
+    const previewReady =
+      typeof data.previewReady === 'boolean' ? data.previewReady : inferPreviewReadyFromLog(nextLog)
+    commandSandboxPreviewReady.value = previewReady
+    if (nextLog && nextLog !== commandSandboxLastProcessLog.value) {
+      const delta = nextLog.startsWith(commandSandboxLastProcessLog.value)
+        ? nextLog.slice(commandSandboxLastProcessLog.value.length)
+        : `\n${nextLog}`
+      commandSandboxLastProcessLog.value = nextLog
+      await appendTerminalOutput(delta)
+    }
+    if (data.running) {
+      commandSandboxState.value = 'running'
+      commandSandboxPreviewUrl.value = data.previewUrl
+      if (previewReady) {
+        previewExternalUrl.value = data.previewUrl
+        await setPreviewFrameToUrl(data.previewUrl)
+      } else if (selectedLesson.value?.scriptLanguage === 'vue') {
+        setSandboxHintPreview('真实 Vue 3 + TypeScript 开发服务启动中，等待预览页面就绪...')
+      }
+      stopCommandSandboxPolling()
+      sandboxProcessPollTimer = setTimeout(() => void pollCommandSandboxProcess(), 1500)
+      return
+    }
+    stopCommandSandboxPolling()
+    commandSandboxState.value = data.exitCode && data.exitCode !== '0' ? 'error' : 'ready'
+    if (data.exitCode) {
+      await appendTerminalOutput(`[process exit ${data.exitCode}] 长驻进程已结束`)
+    }
+    if (previewExternalUrl.value) {
+      previewExternalUrl.value = ''
+      if (selectedLesson.value?.scriptLanguage === 'vue') {
+        setSandboxHintPreview('真实 Vue 3 + TypeScript 预览已停止。重新点击“运行”或在终端执行 `npm run dev` 可恢复。')
+      } else {
+        await runCode()
+      }
+    }
+    await syncSandboxFilesFromSession()
+  } catch (error) {
+    stopCommandSandboxPolling()
+    commandSandboxState.value = 'error'
+    commandSandboxError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+const stopCommandSandboxProcess = async () => {
+  if (!commandSandboxSessionId.value) return
+  stopCommandSandboxPolling()
+  await sandboxFetch<{ ok: boolean }>(
+    `/api/sandbox/sessions/${commandSandboxSessionId.value}/process/stop`,
+    { method: 'POST', body: JSON.stringify({}) },
+  )
+  commandSandboxProcessRunning.value = false
+  commandSandboxState.value = 'ready'
+  commandSandboxPreviewReady.value = false
+  commandSandboxLastProcessLog.value = ''
+  await resetPreviewFrame()
+  await appendTerminalOutput('[system] 已请求停止长驻进程')
+  if (selectedLesson.value?.scriptLanguage === 'vue') {
+    setSandboxHintPreview('真实 Vue 3 + TypeScript 预览已停止。重新点击“运行”或在终端执行 `npm run dev` 可恢复。')
+    return
+  }
+  await runCode()
+}
+
+const runCommandInSandbox = async () => {
+  const command = commandSandboxCommand.value.trim()
+  if (!command) return
+  if (command === 'clear') {
+    commandSandboxOutput.value = ''
+    commandSandboxCommand.value = ''
+    return
+  }
+  if (command === 'reset') {
+    commandSandboxCommand.value = ''
+    await resetCommandSandboxSession()
+    return
+  }
+  if (command === 'stop') {
+    commandSandboxCommand.value = ''
+    await stopCommandSandboxProcess()
+    return
+  }
+  commandSandboxBusy.value = true
+  outputPanelTab.value = 'terminal'
+  commandSandboxError.value = ''
+  await appendTerminalOutput(`$ ${command}`)
+  try {
+    await ensureCommandSandboxSession()
+    await syncSandboxFiles()
+    const background = /^npm\s+run\s+dev\b/.test(command) || /^vite\b/.test(command)
+    const result = await sandboxFetch<
+      | ({ ok: true; background: true; previewUrl: string; command: string })
+      | CommandSandboxExecResult
+    >(`/api/sandbox/sessions/${commandSandboxSessionId.value}/exec`, {
+      method: 'POST',
+      body: JSON.stringify({
+        command,
+        timeoutMs: background ? 15000 : 120000,
+        background,
+      }),
+    })
+
+    if ('background' in result) {
+      commandSandboxProcessRunning.value = true
+      commandSandboxState.value = 'running'
+      commandSandboxLastProcessLog.value = ''
+      commandSandboxPreviewUrl.value = result.previewUrl
+      commandSandboxPreviewReady.value = false
+      await appendTerminalOutput('[system] 已启动开发服务，正在等待预览就绪并轮询日志...')
+      if (selectedLesson.value?.scriptLanguage === 'vue') {
+        setSandboxHintPreview('真实 Vue 3 + TypeScript 开发服务启动中，等待预览页面就绪...')
+      }
+      void pollCommandSandboxProcess()
+      commandSandboxCommand.value = ''
+      return
+    }
+
+    commandSandboxState.value = result.exitCode === 0 ? 'ready' : 'error'
+    commandSandboxWorkspace.value = result.workspaceDir
+    await appendTerminalOutput(
+      [result.stdout.trimEnd(), result.stderr.trimEnd(), `[exit ${result.exitCode}] ${result.elapsedMs} ms${result.timedOut ? '（超时已终止）' : ''}`]
+        .filter(Boolean)
+        .join('\n'),
+    )
+    applySandboxFilesToEditors(result.files)
+    commandSandboxCommand.value = ''
+  } catch (error) {
+    commandSandboxState.value = 'error'
+    commandSandboxError.value = error instanceof Error ? error.message : String(error)
+    await appendTerminalOutput(`[ERROR] ${commandSandboxError.value}`)
+  } finally {
+    commandSandboxBusy.value = false
+  }
+}
+
+const resetCommandSandboxSession = async () => {
+  commandSandboxBusy.value = true
+  commandSandboxError.value = ''
+  try {
+    await destroyCommandSandboxSession()
+    await ensureCommandSandboxSession()
+    await appendTerminalOutput('[system] 已重置命令沙箱，会话目录已重新按当前编辑区内容初始化。')
+  } catch (error) {
+    commandSandboxState.value = 'error'
+    commandSandboxError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    commandSandboxBusy.value = false
+  }
 }
 
 const renderPreview = async (doc: string) => {
+  if (previewExternalUrl.value) return
   await nextTick()
   const frame = previewFrame.value
   if (!frame) return
@@ -495,9 +1054,23 @@ const renderPreview = async (doc: string) => {
   const nextUrl = URL.createObjectURL(
     new Blob([doc], { type: 'text/html;charset=utf-8' }),
   )
+  previewFrameLoading.value = true
+  previewFrameTarget.value = nextUrl
   frame.setAttribute('src', nextUrl)
   sandboxBlobUrl = nextUrl
   if (prev) URL.revokeObjectURL(prev)
+}
+
+const onPreviewFrameLoad = () => {
+  previewFrameLoading.value = false
+}
+
+const setSandboxHintPreview = (message: string) => {
+  previewDoc.value = buildSandboxDocument({
+    html: `<p class="local-practice-hint">${message}</p>`,
+    css: `.local-practice-hint { margin: 0; color: #475569; font-size: 14px; line-height: 1.6; }`,
+    js: '',
+  })
 }
 
 const runCode = async () => {
@@ -506,21 +1079,96 @@ const runCode = async () => {
     consoleLogs.value = [
       '[提示] 本课练习在本地终端或本机仓库中完成，无需在右侧沙箱中运行或预览。',
     ]
-    previewDoc.value = buildSandboxDocument({
-      html: `<p class="local-practice-hint">本课无必做沙箱练习。请切换「文档」/「练练？」在本地跟练。</p>`,
-      css: `.local-practice-hint { margin: 0; color: #475569; font-size: 14px; line-height: 1.5; }`,
-      js: '',
-    })
+    setSandboxHintPreview('本课无必做沙箱练习。请切换「文档」/「练练？」在本地跟练。')
     return
   }
   const ticket = ++runTicket
   runtimeState.value = 'running'
+  const lang = selectedLesson.value?.scriptLanguage ?? 'javascript'
+  if (lang === 'vue') {
+    consoleLogs.value = ['[system] 正在准备真实 Vue 3 + TypeScript 项目...']
+    commandSandboxError.value = ''
+    try {
+      commandSandboxBusy.value = true
+      outputPanelTab.value = 'terminal'
+      await ensureCommandSandboxSession()
+      await syncSandboxFiles()
+
+      if (
+        commandSandboxProcessRunning.value &&
+        commandSandboxPreviewUrl.value &&
+        commandSandboxPreviewReady.value
+      ) {
+        previewExternalUrl.value = commandSandboxPreviewUrl.value
+        await setPreviewFrameToUrl(commandSandboxPreviewUrl.value)
+        runtimeState.value = 'success'
+        consoleLogs.value = ['[system] 已同步到真实 Vue 3 + TypeScript 项目，右侧为 Vite dev server 预览。']
+        return
+      }
+
+      const command = 'if [ ! -d node_modules ]; then npm install; fi && npm run dev'
+      await appendTerminalOutput(`$ ${command}`)
+      const result = await sandboxFetch<
+        | ({ ok: true; background: true; previewUrl: string; command: string })
+        | CommandSandboxExecResult
+      >(`/api/sandbox/sessions/${commandSandboxSessionId.value}/exec`, {
+        method: 'POST',
+        body: JSON.stringify({
+          command,
+          timeoutMs: 240000,
+          background: true,
+        }),
+      })
+
+      if ('background' in result) {
+        commandSandboxProcessRunning.value = true
+        commandSandboxState.value = 'running'
+        commandSandboxLastProcessLog.value = ''
+        commandSandboxPreviewUrl.value = result.previewUrl
+        commandSandboxPreviewReady.value = false
+        runtimeState.value = 'success'
+        consoleLogs.value = ['[system] 真实 Vue 3 + TypeScript 开发服务已启动，正在等待预览页面就绪。']
+        setSandboxHintPreview('真实 Vue 3 + TypeScript 开发服务启动中，等待预览页面就绪...')
+        void pollCommandSandboxProcess()
+        return
+      }
+
+      runtimeState.value = result.exitCode === 0 ? 'success' : 'error'
+      commandSandboxState.value = result.exitCode === 0 ? 'ready' : 'error'
+      commandSandboxWorkspace.value = result.workspaceDir
+      applySandboxFilesToEditors(result.files)
+      consoleLogs.value = [
+        result.exitCode === 0
+          ? '[system] Vue 命令执行完成。'
+          : `[ERROR] Vue 命令执行失败（exit ${result.exitCode}）。`,
+      ]
+      await appendTerminalOutput(
+        [result.stdout.trimEnd(), result.stderr.trimEnd(), `[exit ${result.exitCode}] ${result.elapsedMs} ms${result.timedOut ? '（超时已终止）' : ''}`]
+          .filter(Boolean)
+          .join('\n'),
+      )
+      if (result.exitCode !== 0) {
+        setSandboxHintPreview('真实 Vue 3 + TypeScript 预览启动失败。请查看下方终端输出。')
+      }
+    } catch (error) {
+      if (ticket !== runTicket) return
+      runtimeState.value = 'error'
+      commandSandboxState.value = 'error'
+      commandSandboxError.value = error instanceof Error ? error.message : String(error)
+      consoleLogs.value = [`[ERROR] ${commandSandboxError.value}`]
+      setSandboxHintPreview('真实 Vue 3 + TypeScript 预览启动失败。请查看下方终端输出。')
+      await appendTerminalOutput(`[ERROR] ${commandSandboxError.value}`)
+    } finally {
+      commandSandboxBusy.value = false
+    }
+    return
+  }
+
   consoleLogs.value = ['[system] 代码执行中...']
   try {
-    const lang = selectedLesson.value?.scriptLanguage ?? 'javascript'
     const script = await transpileScript(jsCode.value, lang)
     if (ticket !== runTicket) return
-    const runtime: SandboxRuntime = lang === 'vue' ? 'vue3' : 'vanilla'
+    const runtime: SandboxRuntime = 'vanilla'
     previewDoc.value = buildSandboxDocument({
       html: htmlCode.value,
       css: cssCode.value,
@@ -530,13 +1178,11 @@ const runCode = async () => {
   } catch (error) {
     if (ticket !== runTicket) return
     runtimeState.value = 'error'
-    const lang = selectedLesson.value?.scriptLanguage ?? 'javascript'
-    const runtime: SandboxRuntime = lang === 'vue' ? 'vue3' : 'vanilla'
     previewDoc.value = buildSandboxDocument({
       html: htmlCode.value,
       css: cssCode.value,
       js: '',
-      runtime,
+      runtime: 'vanilla',
     })
     consoleLogs.value.push(`[ERROR] 编译失败：${error instanceof Error ? error.message : String(error)}`)
   }
@@ -562,11 +1208,17 @@ const applyMergedStarter = (lesson: Lesson, exerciseId: string) => {
 const loadLesson = async (lessonId: string) => {
   const lesson = lessons.find((item) => item.id === lessonId)
   if (!lesson) return
-  const draft = readDrafts()[lesson.id]
+  const previousLessonId = selectedLessonId.value
+  const isSwitchingLesson = !!previousLessonId && previousLessonId !== lesson.id
   const exs = getLessonExercises(lesson.id)
   isHydratingLesson.value = true
   selectedLessonId.value = lesson.id
   activeExerciseId.value = exs[0]?.id ?? ''
+  if (isSwitchingLesson) {
+    await destroyCommandSandboxSession()
+  }
+  await resetPreviewFrame()
+  const draft = takeCompatibleDraft(lesson)
   if (draft) {
     htmlCode.value = draft.html
     cssCode.value = draft.css
@@ -583,6 +1235,14 @@ const loadLesson = async (lessonId: string) => {
     ch1PanelOpen.value = true
   }
   await runCode()
+  if (lessonNeedsSandbox.value && !commandSandboxSessionId.value && commandSandboxState.value !== 'offline') {
+    try {
+      await ensureCommandSandboxSession()
+      await syncSandboxFilesFromSession()
+    } catch {
+      // runCode 已负责暴露错误，这里只尽量保证标签名与真实文件对应
+    }
+  }
   isHydratingLesson.value = false
 }
 
@@ -628,6 +1288,32 @@ const jumpToHeading = async (id: string) => {
   })
 }
 
+const applySearchResult = async (result: SearchResultItem) => {
+  await loadLesson(result.lessonId)
+  if (result.type === 'heading' && result.headingId) {
+    await jumpToHeading(result.headingId)
+  } else {
+    docTab.value = 'docs'
+  }
+  searchPanelOpen.value = false
+}
+
+const onSearchFocus = () => {
+  searchPanelOpen.value = true
+}
+
+const onSearchEnter = async () => {
+  if (!searchResults.value.length) return
+  await applySearchResult(searchResults.value[0])
+}
+
+const onSearchContainerPointerDown = (event: PointerEvent) => {
+  const target = event.target as Node | null
+  if (!target) return
+  if (searchBoxRef.value?.contains(target)) return
+  searchPanelOpen.value = false
+}
+
 const setupSmartScrollbars = () => {
   while (scrollbarCleanupFns.length > 0) scrollbarCleanupFns.pop()?.()
   document.querySelectorAll<HTMLElement>('[data-scrollbar]').forEach((el) => {
@@ -668,6 +1354,7 @@ watch([htmlCode, cssCode, jsCode], () => {
   if (isHydratingLesson.value) return
   persistDraft()
   scheduleAutoRun()
+  scheduleSandboxFileSync()
 })
 watch(previewDoc, (value) => void renderPreview(value))
 watch([docTab, selectedLessonId], async () => {
@@ -706,21 +1393,23 @@ const onSandboxMessage = (event: MessageEvent) => {
 
 onMounted(() => {
   window.addEventListener('message', onSandboxMessage)
-  void probeCommandSandbox()
-  const cached = localStorage.getItem(LAST_LESSON_KEY)
-  const normalized = cached ? normalizeStoredLessonId(cached) : null
-  if (cached && normalized && cached !== normalized) {
-    localStorage.setItem(LAST_LESSON_KEY, normalized)
-  }
-  const first = lessons.find((item) => item.id === (normalized ?? '')) ?? lessons[0]
-  void loadLesson(first.id)
-  void nextTick().then(setupSmartScrollbars)
+  document.addEventListener('pointerdown', onSearchContainerPointerDown)
+  void (async () => {
+    await refreshAuthState()
+    if (authUser.value) {
+      await initializeAuthedApp()
+    }
+    authLoading.value = false
+  })()
 })
 
 onUnmounted(() => {
   window.removeEventListener('message', onSandboxMessage)
+  document.removeEventListener('pointerdown', onSearchContainerPointerDown)
   if (autoRunTimer) clearTimeout(autoRunTimer)
   if (cleanTimer.value) clearTimeout(cleanTimer.value)
+  if (sandboxFileSyncTimer) clearTimeout(sandboxFileSyncTimer)
+  stopCommandSandboxPolling()
   void destroyCommandSandboxSession()
   if (sandboxBlobUrl) {
     URL.revokeObjectURL(sandboxBlobUrl)
@@ -742,41 +1431,82 @@ const runtimeLabelMap = {
     <header class="topbar">
       <div class="topbar-left">
         <div class="brand-mark" aria-hidden="true">
-          <svg
-            class="brand-mark-ico"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <polyline points="16 18 22 12 16 6" />
-            <polyline points="8 6 2 12 8 18" />
-          </svg>
+          <img class="brand-mark-ico" :src="brandIcon" alt="" width="30" height="30" />
         </div>
         <strong class="brand-title">Averontend PlayGround</strong>
       </div>
-      <nav class="topbar-nav">
-        <a href="#">学习路径</a>
-        <a href="#">课程</a>
-        <a href="#">练习</a>
-        <a href="#">项目</a>
-        <a href="#">社区</a>
-        <a href="#">资源</a>
-      </nav>
       <div class="topbar-right">
-        <label class="search-box">
-          <input type="text" placeholder="搜索文档、课程、代码..." />
-          <span>⌕</span>
-        </label>
-        <button type="button" class="icon-btn">◔</button>
-        <button type="button" class="profile-btn">前端小白 ▾</button>
+        <div ref="searchBoxRef" class="search-wrap">
+          <label class="search-box">
+            <input
+              v-model="searchQuery"
+              type="text"
+              placeholder="搜索文档、课程、代码..."
+              @focus="onSearchFocus"
+              @keydown.enter.prevent="onSearchEnter"
+            />
+            <span>⌕</span>
+          </label>
+          <div v-if="showSearchPanel" class="search-panel">
+            <button
+              v-for="item in searchResults"
+              :key="item.key"
+              type="button"
+              class="search-result-item"
+              @click="applySearchResult(item)"
+            >
+              <span class="search-result-title">{{ item.title }}</span>
+              <span class="search-result-meta">{{ item.subtitle }}</span>
+            </button>
+            <div v-if="searchResults.length === 0" class="search-empty">未找到匹配结果</div>
+          </div>
+        </div>
+        <div v-if="authUser" class="auth-toolbar">
+          <span class="auth-user-chip">{{ authUser.username }}</span>
+          <button type="button" class="auth-logout-btn" :disabled="authBusy" @click="void logout()">退出</button>
+        </div>
       </div>
     </header>
 
-    <main class="learning-layout">
+    <main v-if="authLoading" class="auth-gate auth-gate-loading">
+      <section class="auth-panel card">
+        <p class="auth-kicker">Averontend</p>
+        <h2>正在恢复登录状态</h2>
+        <p class="auth-tip">稍候片刻，正在检查当前浏览器会话。</p>
+      </section>
+    </main>
+
+    <main v-else-if="!authUser" class="auth-gate">
+      <section class="auth-panel card">
+        <p class="auth-kicker">Averontend</p>
+        <h2>{{ authMode === 'login' ? '登录后继续学习' : '先创建一个账号' }}</h2>
+        <p class="auth-tip">一个用户只绑定一个沙箱，会话闲置后会自动销毁。</p>
+        <form class="auth-form" @submit.prevent="void submitAuth()">
+          <label class="auth-field">
+            <span>用户名</span>
+            <input v-model.trim="authUsername" type="text" autocomplete="username" placeholder="输入用户名" />
+          </label>
+          <label class="auth-field">
+            <span>密码</span>
+            <input
+              v-model="authPassword"
+              type="password"
+              autocomplete="current-password"
+              placeholder="至少 6 位"
+            />
+          </label>
+          <p v-if="authError" class="auth-error">{{ authError }}</p>
+          <button type="submit" class="auth-primary-btn" :disabled="authBusy">
+            {{ authBusy ? `${authActionLabel}中...` : authActionLabel }}
+          </button>
+        </form>
+        <button type="button" class="auth-toggle-btn" :disabled="authBusy" @click="toggleAuthMode">
+          {{ authSwitchLabel }}
+        </button>
+      </section>
+    </main>
+
+    <main v-else class="learning-layout">
       <aside class="left-rail">
         <section class="rail-card map-rail-one">
           <button type="button" class="map-rail-head" @click="mapCourseOpen = !mapCourseOpen">
@@ -965,13 +1695,25 @@ const runtimeLabelMap = {
       <section class="doc-pane card">
         <div class="pane-tabs">
           <button type="button" :class="{ active: docTab === 'docs' }" @click="docTab = 'docs'">文档</button>
-          <button type="button" :class="{ active: docTab === 'guide' }" @click="docTab = 'guide'">练练？</button>
+          <button type="button" :class="{ active: docTab === 'guide' }" @click="docTab = 'guide'">写代码</button>
         </div>
 
         <header class="doc-header">
           <h2>{{ moduleNameMap[selectedLesson?.module ?? 'basics'] }}</h2>
           <p>当前课程：{{ selectedLesson?.title }}</p>
         </header>
+
+        <section
+          v-if="docTab === 'docs' && selectedLesson?.module === 'vue'"
+          class="module-entry-note module-entry-note-vue"
+        >
+          <p>
+            建议优先在本地跑真实 Vue 项目：先执行
+            <code>npm create vite@latest your-vue-app -- --template vue-ts</code>，进入目录后运行
+            <code>npm install</code> 与 <code>npm run dev</code>。
+            站内沙箱可用于跟练，但因容器、端口转发与 iframe 预览等问题，偶尔会出现启动慢或白屏，学习阶段以本地环境为主更稳。
+          </p>
+        </section>
 
         <section
           v-if="docTab === 'docs'"
@@ -1034,27 +1776,21 @@ const runtimeLabelMap = {
                 :class="{ active: activeEditorTab === 'html' }"
                 @click="activeEditorTab = 'html'"
               >
-                HTML
+                {{ editorFileLabels.html }}
               </button>
               <button
                 type="button"
                 :class="{ active: activeEditorTab === 'css' }"
                 @click="activeEditorTab = 'css'"
               >
-                CSS
+                {{ editorFileLabels.css }}
               </button>
               <button
                 type="button"
                 :class="{ active: activeEditorTab === 'js' }"
                 @click="activeEditorTab = 'js'"
               >
-                {{
-                selectedLesson?.scriptLanguage === 'typescript'
-                  ? 'TS'
-                  : selectedLesson?.scriptLanguage === 'vue'
-                    ? 'Vue 3'
-                    : 'JS'
-              }}
+                {{ editorFileLabels.js }}
               </button>
             </div>
 
@@ -1124,89 +1860,81 @@ const runtimeLabelMap = {
           </div>
         </header>
 
-        <details
-          v-if="lessonNeedsSandbox"
-          class="local-npm-details"
-        >
-          <summary class="local-npm-summary">本机终端：npm 与 Node</summary>
-          <div class="local-npm-body">
-            <p class="local-npm-lead">
-              浏览器内<strong>无法</strong>代你执行
-              <code>npm</code> / <code>node</code> / 安装包；当前「页面预览」只在隔离
-              <code>iframe</code> 里跑已加载的页面脚本。依赖安装、Vite/构建请在<strong>本机</strong>终端执行（需已装
-              <a
-                href="https://nodejs.org/"
-                target="_blank"
-                rel="noreferrer noopener"
-              >Node.js</a>）。
-            </p>
-            <p
-              v-if="copyNpmHint"
-              class="local-npm-copied"
-              role="status"
-            >
-              已复制到剪贴板
-            </p>
-            <pre class="local-npm-snippet"><code>{{ localNpmCommands.trimEnd() }}</code></pre>
-            <button
-              type="button"
-              class="code-btn-run local-npm-copy"
-              @click="void copyLocalNpmCommands()"
-            >
-              复制上述命令
-            </button>
+        <div class="preview-frame-wrap">
+          <div
+            v-if="previewLoading"
+            class="preview-loading"
+            aria-live="polite"
+          >
+            <span class="preview-loading-spinner" aria-hidden="true"></span>
+            <p>{{ previewLoadingText }}</p>
           </div>
-        </details>
+          <iframe
+            ref="previewFrame"
+            title="preview-sandbox"
+            class="preview-sandbox-frame"
+            sandbox="allow-scripts allow-same-origin"
+            referrerpolicy="no-referrer"
+            @load="onPreviewFrameLoad"
+          ></iframe>
+        </div>
 
-        <details
-          v-if="lessonNeedsSandbox"
-          class="command-sandbox-details"
-          open
-        >
-          <summary class="local-npm-summary">命令沙箱（Docker）</summary>
-          <div class="command-sandbox-body">
-            <p class="command-sandbox-lead">
-              这里会在本机 Docker 容器里执行命令，工作目录是当前仓库的一份<strong>隔离拷贝</strong>。适合
-              <code>npm install</code>、<code>npm run build</code> 这类<strong>非交互</strong>命令。
-            </p>
-            <p class="command-sandbox-meta">
-              状态：{{ commandSandboxStatusLabel }}
-              <template v-if="commandSandboxWorkspace">
-                · 工作区：<code>{{ commandSandboxWorkspace }}</code>
-              </template>
-            </p>
-            <div class="command-sandbox-toolbar">
+        <div class="console-block">
+          <div class="console-head console-head-tabs">
+            <div class="console-tabs">
               <button
                 type="button"
-                class="code-btn-reset"
-                :disabled="commandSandboxBusy"
-                @click="void resetCommandSandboxSession()"
+                :class="{ active: outputPanelTab === 'terminal' }"
+                @click="outputPanelTab = 'terminal'"
               >
-                重置会话
+                终端
               </button>
               <button
                 type="button"
-                class="code-btn-run"
-                :disabled="commandSandboxBusy || commandSandboxState === 'offline' || !commandSandboxCommand.trim()"
-                @click="void runCommandInSandbox()"
+                :class="{ active: outputPanelTab === 'console' }"
+                @click="outputPanelTab = 'console'"
               >
-                {{ commandSandboxBusy ? '执行中...' : commandSandboxSessionId ? '执行命令' : '初始化并执行' }}
+                控制台
               </button>
             </div>
-            <input
-              v-model="commandSandboxCommand"
-              class="command-sandbox-input"
-              type="text"
-              placeholder="例如：npm run build"
-              @keyup.enter.exact.prevent="void runCommandInSandbox()"
-            />
-            <p class="command-sandbox-note">
-              长驻命令如 <code>npm run dev</code> 当前不会自动转发端口到右侧预览；更适合安装依赖、构建、测试等一次性命令。
-            </p>
-            <p class="command-sandbox-note">
-              首次执行若本机没有镜像，会尝试拉取 <code>node:22-bookworm</code>；若 Docker Hub 网络不通，请先手动
-              <code>docker pull node:22-bookworm</code>。
-            </p>
+            <button
+              v-if="outputPanelTab === 'console'"
+              type="button"
+              @click="consoleLogs = []"
+            >
+              清空
+            </button>
+          </div>
+          <div
+            v-if="outputPanelTab === 'terminal'"
+            class="command-sandbox-shell"
+          >
+            <div class="command-sandbox-shell-head">
+              <span class="command-sandbox-shell-title">终端</span>
+              <span class="command-sandbox-shell-meta">
+                {{ commandSandboxStatusLabel }}
+                <template v-if="commandSandboxWorkspace">
+                  · {{ commandSandboxWorkspace }}
+                </template>
+              </span>
+            </div>
+            <pre
+              ref="terminalOutputRef"
+              class="command-sandbox-output"
+              data-scrollbar
+            ><code>{{ terminalOutputDisplay }}</code></pre>
+            <label class="command-sandbox-terminal-line">
+              <span class="command-sandbox-prompt">$</span>
+              <input
+                v-model="commandSandboxCommand"
+                class="command-sandbox-input"
+                type="text"
+                spellcheck="false"
+                placeholder="输入命令后回车"
+                :disabled="commandSandboxState === 'offline' || commandSandboxBusy"
+                @keyup.enter.exact.prevent="void runCommandInSandbox()"
+              />
+            </label>
             <p
               v-if="commandSandboxError"
               class="command-sandbox-error"
@@ -1214,26 +1942,28 @@ const runtimeLabelMap = {
             >
               {{ commandSandboxError }}
             </p>
-            <pre class="command-sandbox-output"><code>{{ commandSandboxOutput }}</code></pre>
           </div>
-        </details>
-
-        <div class="preview-frame-wrap">
-          <iframe
-            ref="previewFrame"
-            title="preview-sandbox"
-            class="preview-sandbox-frame"
-            sandbox="allow-scripts"
-            referrerpolicy="no-referrer"
-          ></iframe>
-        </div>
-
-        <div class="console-block">
-          <div class="console-head">
-            <span>控制台输出</span>
-            <button type="button" @click="consoleLogs = []">清空</button>
+          <div
+            v-else
+            class="console-output"
+            data-scrollbar
+          >
+            <p
+              v-if="consoleEntries.length === 0"
+              class="console-empty"
+            >
+              暂无控制台输出
+            </p>
+            <div
+              v-for="(entry, index) in consoleEntries"
+              :key="`${index}-${entry.label}`"
+              class="console-entry"
+              :class="`console-entry-${entry.level}`"
+            >
+              <span class="console-entry-label">{{ entry.label }}</span>
+              <span class="console-entry-message">{{ entry.message }}</span>
+            </div>
           </div>
-          <pre data-scrollbar>{{ consoleLogs.join('\n') }}</pre>
         </div>
       </section>
 
