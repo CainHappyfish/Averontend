@@ -16,7 +16,14 @@ import ts01Doc from '../content/docs/typescript/ts-01-intro-tuple-enum.md?raw'
 import ts02Doc from '../content/docs/typescript/ts-02-type-alias-and-generics.md?raw'
 import ts03Doc from '../content/docs/typescript/ts-03-utility-pick-omit.md?raw'
 import ts04Doc from '../content/docs/typescript/ts-04-returntype-nonnullable.md?raw'
-import vueDoc from '../content/docs/vue.md?raw'
+import vue01Doc from '../content/docs/vue/vue-01.md?raw'
+import vue02Doc from '../content/docs/vue/vue-02.md?raw'
+import vue03Doc from '../content/docs/vue/vue-03.md?raw'
+import vue04Doc from '../content/docs/vue/vue-04.md?raw'
+import vue05Doc from '../content/docs/vue/vue-05.md?raw'
+import vue06Doc from '../content/docs/vue/vue-06.md?raw'
+import vue07Doc from '../content/docs/vue/vue-07.md?raw'
+import vue08Doc from '../content/docs/vue/vue-08.md?raw'
 
 export const moduleDocMarkdownMap: Record<ModuleKey, string> = {
   /** 当无法按节命中时使用（不应长期依赖，仅兜底） */
@@ -24,7 +31,18 @@ export const moduleDocMarkdownMap: Record<ModuleKey, string> = {
   improve: imp01Doc,
   engineering: eng01Doc,
   typescript: ts01Doc,
-  vue: vueDoc,
+  vue: vue01Doc,
+}
+
+const vueByLessonId: Record<string, string> = {
+  'vue-01': vue01Doc,
+  'vue-02': vue02Doc,
+  'vue-03': vue03Doc,
+  'vue-04': vue04Doc,
+  'vue-05': vue05Doc,
+  'vue-06': vue06Doc,
+  'vue-07': vue07Doc,
+  'vue-08': vue08Doc,
 }
 
 /** 多模块下：子课 id 与文档一一对应（basics / improve / engineering / typescript） */
@@ -69,6 +87,9 @@ export const getDocMarkdown = (lesson: Lesson | undefined): string => {
   }
   if (lesson && lesson.module === 'engineering' && engineeringByLessonId[lesson.id]) {
     return engineeringByLessonId[lesson.id]
+  }
+  if (lesson && lesson.module === 'vue' && vueByLessonId[lesson.id]) {
+    return vueByLessonId[lesson.id]
   }
   if (!lesson) return moduleDocMarkdownMap.basics
   return moduleDocMarkdownMap[lesson.module]

@@ -1,7 +1,7 @@
 import * as esbuild from 'esbuild-wasm'
 import wasmUrl from 'esbuild-wasm/esbuild.wasm?url'
 
-type ScriptLanguage = 'javascript' | 'typescript'
+type ScriptLanguage = 'javascript' | 'typescript' | 'vue'
 
 let isEsbuildReady = false
 let initPromise: Promise<void> | null = null
@@ -30,6 +30,17 @@ export const transpileScript = async (
   if (language === 'javascript') return sourceCode
 
   await ensureEsbuildReady()
+
+  /** 课程站「Vue3」课：在沙箱中写 `createApp` + `ref` 等，按 TS 去类型（可写纯 JS） */
+  if (language === 'vue') {
+    const output = await esbuild.transform(sourceCode, {
+      loader: 'ts',
+      target: 'es2020',
+      sourcemap: false,
+    })
+    return output.code
+  }
+
   const output = await esbuild.transform(sourceCode, {
     loader: 'ts',
     target: 'es2020',

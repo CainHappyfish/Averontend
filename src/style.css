@@ -1836,3 +1836,214 @@ body {
     min-height: 520px;
   }
 }
+
+/* —— Monaco：溢出小部件（悬停 / Quick Fix 等）不被侧栏与代码卡片裁切 —— */
+/* overflowWidgetsDomNode: document.body 时，子节点在 body 下，需 z-index 高于分栏与卡片 */
+body > .overflowingContentWidgets,
+body .overflowingContentWidgets,
+body .suggest-widget,
+body .context-view,
+body .rename-box,
+body .monaco-hover,
+.monaco-editor .overflowingContentWidgets,
+.monaco-editor .monaco-hover,
+.monaco-hover {
+  z-index: 10050 !important;
+}
+
+body .monaco-hover,
+.monaco-editor .monaco-hover,
+.monaco-hover {
+  max-width: min(96vw, 38rem) !important;
+  line-height: 1.55;
+  font-size: 13px;
+  background: #1f2937 !important;
+  border: 1px solid rgba(148, 163, 184, 0.28) !important;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.38) !important;
+  color: #e5e7eb !important;
+}
+
+body .monaco-hover .hover-row,
+body .monaco-hover .hover-row .hover-contents,
+body .monaco-hover .markdown-hover,
+.monaco-editor .monaco-hover .hover-row,
+.monaco-editor .monaco-hover .hover-row .hover-contents,
+.monaco-editor .monaco-hover .markdown-hover,
+.monaco-hover .hover-row,
+.monaco-hover .hover-row .hover-contents,
+.monaco-hover .markdown-hover {
+  background: #1f2937 !important;
+  color: #e5e7eb !important;
+}
+
+.monaco-hover .hover-row .hover-contents {
+  padding: 10px 12px;
+  max-width: 100%;
+}
+
+.monaco-hover .hover-contents,
+.monaco-hover .markdown-hover {
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+/* 本机 npm 说明（预览区上方） */
+.local-npm-details {
+  margin: 0 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.local-npm-summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 600;
+  color: var(--text);
+  list-style: none;
+}
+
+.local-npm-summary::-webkit-details-marker {
+  display: none;
+}
+
+.local-npm-summary::before {
+  content: '▶ ';
+  color: #64748b;
+  font-size: 10px;
+  margin-right: 6px;
+}
+
+.local-npm-details[open] .local-npm-summary::before {
+  content: '▼ ';
+}
+
+.local-npm-body {
+  padding: 0 12px 12px;
+  color: #475569;
+  line-height: 1.55;
+}
+
+.local-npm-lead {
+  margin: 0 0 10px;
+}
+
+.local-npm-lead code {
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.local-npm-copied {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #15803d;
+  font-weight: 600;
+}
+
+.local-npm-snippet {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: auto;
+}
+
+.local-npm-snippet code {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  color: inherit;
+  background: none;
+  padding: 0;
+}
+
+.local-npm-copy {
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.command-sandbox-details {
+  margin: 0 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.command-sandbox-body {
+  padding: 0 12px 12px;
+  color: #475569;
+  line-height: 1.55;
+}
+
+.command-sandbox-lead {
+  margin: 0 0 10px;
+}
+
+.command-sandbox-meta {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.command-sandbox-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 10px;
+}
+
+.command-sandbox-input {
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 13px;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+}
+
+.command-sandbox-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--brand) 30%, transparent);
+  border-color: var(--brand);
+}
+
+.command-sandbox-note {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.command-sandbox-error {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.command-sandbox-output {
+  margin: 0;
+  min-height: 120px;
+  max-height: 240px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #020617;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow: auto;
+}
+
+.command-sandbox-output code {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  color: inherit;
+  background: none;
+  padding: 0;
+}

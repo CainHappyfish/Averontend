@@ -36,6 +36,7 @@ export interface Lesson {
    * 为 `false` 时本课练习在本地终端/编辑器完成，不依赖右侧沙箱预览。未写时与 `true` 相同。
    */
   practiceRequiresSandbox?: boolean
-  scriptLanguage: 'javascript' | 'typescript'
+  /** `vue`：沙箱注入 Vue3 全量包（`Vue` 全局 + 常用 API 别名），用 TS/JS 写 `createApp` 等 */
+  scriptLanguage: 'javascript' | 'typescript' | 'vue'
   starterCode: LessonStarter
 }

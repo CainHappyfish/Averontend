@@ -183,12 +183,12 @@ export const moduleDocs: Record<ModuleKey, ModuleDoc> = {
   },
   vue: {
     module: 'vue',
-    title: 'Vue 常用用法（入门到进阶）',
-    summary: '围绕组合式 API 组织，覆盖日常 Vue 开发主流程。',
+    title: 'Vue 3 从基础到常见用法',
+    summary: '以 Composition API（**组合式 API** 与之为同一套）为主线：setup、ref、组合式风格；**勿** 使用 Options API / 选项式（data、methods 等）完成本站练习。文档示例与本地工程侧重 <script setup>，沙箱中可用 createApp({ setup, template })。',
     quickChecklist: [
-      '组件基础：props/emit/computed/watch',
-      '状态管理：Pinia 管理跨组件状态',
-      '工程实践：可复用 composable 与路由拆分',
+      '响应式与模板：ref、reactive、指令、v-model、class',
+      '组件：props、emit、插槽、生命周期、provide/inject',
+      '进阶：composables、Router/Pinia 引入时机与职责划分',
     ],
     topics: [
       {

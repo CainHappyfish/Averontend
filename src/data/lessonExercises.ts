@@ -612,32 +612,234 @@ export const lessonExercisesByLessonId: Record<string, LessonExercise[]> = {
     },
   ],
 
-  'vue-mind': [
+  'vue-01': [
     {
-      id: 'vue-1',
-      title: '多状态同渲染',
-      relatedConcept: 'state 与 render',
-      task: '在 `state` 中增加 `label: string`（如「次数」），在模板字符串中同时显示 `label` 与 `count`。',
+      id: 'vue01-1',
+      title: '多状态同屏',
+      relatedConcept: 'ref 与 template',
+      task: '在 `setup` 中增加 `label`（`ref`）与 `count`，在 `template` 里**同时**显示「标签」和计数。',
+      hints: ['多份文案引用同一 `ref` 时，会一起随数据更新。'],
+    },
+    {
+      id: 'vue01-2',
+      title: '集中改状态',
+      relatedConcept: 'reactive 与 Object.assign',
+      task: '把计数与标签放进**同一个** `reactive({ count, label })`（或 `ref({ ... })`），并写一个 `function bump() { ... }` 在点击时**只通过该函数**改 `count`（不直接在模板里 `count++` 也可，但本题为体会「单入口改状态」）。',
       hints: [
-        '理解「单页状态 + 全量/局部重绘」的朴素模型。',
+        '小应用里「单入口」和 Pinia action 的直觉类似：改数据经过统一函数。',
+        '在 `setup` 里 return `bump` 供模板 `@click`。',
       ],
     },
     {
-      id: 'vue-2',
-      title: 'setState 雏形',
-      relatedConcept: '先改数据再 render',
-      task: '抽出 `function setState(partial) { Object.assign(state, partial); render() }`，点击时用 `setState` 而不要在回调里手抄多处 `state.count += 1`+`render`（仍可用，但练习合一入口）。',
+      id: 'vue01-3',
+      title: '封顶与派生提示',
+      relatedConcept: 'v-bind 与条件文案',
+      task: '当 `count >= 5` 时，按钮加 `:disabled="true"` 条件（如 `:disabled="count >= 5"`），并把提示文案在模板里用 `v-if` / 三元 显示为「已封顶」。',
       hints: [
-        '与「先更新状态再重绘」的 Vue/响应式思想对齐。',
+        '不要再用手写 `innerHTML`；支路写在 `template` 中。',
+        '对比：以前手写 `render` 时每次会重绑事件，现在由 Vue 做更新。',
+      ],
+    },
+  ],
+
+  'vue-02': [
+    {
+      id: 'vue02-1',
+      title: '插值小面板',
+      relatedConcept: '{{ }} 与表达式',
+      task: '在 `setup` 中 `ref` 出 `name` 与 `n`，在 `template` 中写 `你好，{{ name }}，两倍的 n 是 {{ n * 2 }}`。',
+      hints: ['插值 = 双花括号里的表达式。'],
+    },
+    {
+      id: 'vue02-2',
+      title: '`:href` 与 `target`',
+      relatedConcept: 'v-bind 与 attribute',
+      task: '在 `template` 中写链接：`:href`、`:title`、`target=\"_blank\"`、`rel=\"noreferrer noopener\"`；`url`/`tip` 来自 `setup` 的 `ref`。',
+      hints: [':href / :title 即属性绑定；新窗口要配 `rel` 防 opener。', '若外链在沙箱被拦截，以代码写对为准。'],
+    },
+    {
+      id: 'vue02-3',
+      title: '@click 切换',
+      relatedConcept: 'v-on 与 :class',
+      task: '用 `ref` 做布尔量 `on`，`@click` 取反；用 `:class` 或 `:style` 切换亮/暗背景块。',
+      hints: ['`@click` 直接绑 `setup` 中 return 的函数。'],
+    },
+  ],
+
+  'vue-03': [
+    {
+      id: 'vue03-1',
+      title: '多字段 form 对象',
+      relatedConcept: 'reactive 与 v-model',
+      task: '用 `reactive({ name: \'\', city: \'上海\' })` 作为 `form`，`template` 里用 `v-model` 绑 `input` 与 `select` 的 `form.city`。',
+      hints: ['不要解构出 `form` 再当响应式用。'],
+    },
+    {
+      id: 'vue03-2',
+      title: '体会 ref 的 .value',
+      relatedConcept: 'ref 的间接层',
+      task: '单独用 `const count = ref(0)`，在 `setup` 里**显式**用 `count.value++` 写在一个方法中给按钮 `@click`；`template` 中仍用 `{{ count }}`。',
+      hints: [
+        '脚本里与模板里对 `ref` 的写法差异是刻意练习。',
+        '对应文档：script 中 `.value`，模板中自动解包。',
       ],
     },
     {
-      id: 'vue-3',
-      title: '边界与禁用',
-      relatedConcept: '由状态派生 UI',
-      task: '当 `count >= 5` 时让按钮 `disabled` 并改文案为「已封顶」；在 `render` 中根据 `state` 写条件分支。',
+      id: 'vue03-3',
+      title: '批量 Object.assign',
+      relatedConcept: 'reactive 部分更新',
+      task: '写 `function applyPatch(p) { Object.assign(form, p) }`（`form` 为 `reactive` 对象），一次调用同时改 `name` 与 `city`。',
+      hints: ['`Object.assign` 合并进已有 reactive 时仍保持代理。'],
+    },
+  ],
+
+  'vue-04': [
+    {
+      id: 'vue04-1',
+      title: '派生全名',
+      relatedConcept: 'computed',
+      task: '用 `ref` 放 `first`、`last`，`computed` 得到 `full`；`template` 只展示 `{{ full }}`。',
       hints: [
-        '不要在每帧重复绑无限次监听，当前示例每次 `render` 会重绑，思考如何只绑一次是进阶题（可略）。',
+        '不要在别处再维护一份会抄错的「第三份」全名字符串。',
+        '`computed` 会按依赖缓存。',
+      ],
+    },
+    {
+      id: 'vue04-2',
+      title: 'watch 打日志',
+      relatedConcept: 'watch(new, old)',
+      task: '维护 `userId`（`ref`），`watch(userId, (n, o) => { ... })` 里把 `old → new` 推入 `log`（`ref` 包数组即可），在模板中列出最近 3 条。',
+      hints: [
+        '在 watch 回调里用 `n` 与 `o`；若需要首次也记，可设 `immediate: true`。',
+        '不必手写「对比上次」的临时变量。',
+      ],
+    },
+    {
+      id: 'vue04-3',
+      title: '避免在 computed 里做副作用',
+      relatedConcept: 'computed 纯净',
+      task: '确保 `full` 的 `computed` **只** return 组合字符串；若要在变化时打 log，用 `watch` 或按钮事件，在注释中写一句原因。',
+      hints: [
+        '与文档一致：派生不碰副作用。',
+        '副作用放在 `watch` 或用户事件里。',
+      ],
+    },
+  ],
+
+  'vue-05': [
+    {
+      id: 'vue05-1',
+      title: 'v-for 列表',
+      relatedConcept: 'v-for 与 :key',
+      task: '准备 `items: { id, label }[]`（`ref` 或 `reactive`），`v-for` 渲染列表，`:key="item.id"`，点击用 `activeId` 高亮当前项（`:class`）。',
+      hints: [':key 用**稳定**业务 id。'],
+    },
+    {
+      id: 'vue05-2',
+      title: 'v-if 与 v-show 对照',
+      relatedConcept: '存在与否 vs 显隐',
+      task: '同一布尔 `showPanel`：一块用 `v-if` 包内容，另一块用 `v-show`；在注释中写一句二者差异（节点是否销毁子树）。',
+      hints: [
+        '可配合「子树里有 input」观察焦点是否被拆掉。',
+      ],
+    },
+    {
+      id: 'vue05-3',
+      title: '事件修饰 .prevent',
+      relatedConcept: '事件修饰',
+      task: '`<form @submit.prevent="onSubmit">`，`onSubmit` 里**不要**真提交；`console` 或页面提示已拦截默认行为。',
+      hints: [
+        '`.prevent` 即对 `submit` 调用 `e.preventDefault()`，避免整页刷新。',
+      ],
+    },
+  ],
+
+  'vue-06': [
+    {
+      id: 'vue06-1',
+      title: 'v-model 文本',
+      relatedConcept: 'v-model 与 input',
+      task: '用 `v-model` 绑 `text`；再写一版拆成 `:value` + `@input`（在 `@input` 里写回 `text`），在注释中对应「v-model 的两部分」。',
+      hints: [
+        '拆写帮助理解，日常优先 `v-model`。',
+      ],
+    },
+    {
+      id: 'vue06-2',
+      title: '子组件 + emit',
+      relatedConcept: 'props 与 emit',
+      task: '用 `defineComponent` 写子组件，**根逻辑在 `setup()` 中**；声明 `props` 与 `emits`，在 `setup` 里返回模板要用到的项；`template` 里按钮 `emit(\'bump\')`；**不要** 使用 `data()` / `methods`（选项式）。父根在 `@bump` 里改 `msg`。',
+      hints: [
+        '无 SFC 时，子组件写在与 `createApp` 同一份脚本中即可；`props`/`emits` 可与 `setup` 同写在 `defineComponent` 选项里，仍属 Composition API。',
+      ],
+    },
+    {
+      id: 'vue06-3',
+      title: 'trim 修饰',
+      relatedConcept: 'v-model 修饰符',
+      task: '对输入使用 `v-model.trim`，或自己比较「输入时 trim」与「提交时 trim」的取舍，用注释说明。',
+      hints: [
+        '`.trim` 修饰符与在回调里对字符串 `trim()` 的取舍不同。',
+      ],
+    },
+  ],
+
+  'vue-07': [
+    {
+      id: 'vue07-1',
+      title: '具名 / 作用域插槽',
+      relatedConcept: '作用域插槽',
+      task: '子组件 `List` 用 `v-for` + `<slot name="row" :item="item" />`；父用 `<template #row="{ item }">` 自定义列内容。',
+      hints: [
+        '数据在子、展示在父 = 作用域插槽典型形态。',
+      ],
+    },
+    {
+      id: 'vue07-2',
+      title: 'onMounted 计时',
+      relatedConcept: 'onMounted 与 onUnmounted',
+      task: '在 `onMounted` 里 `setInterval` 自增秒数，在 `onUnmounted` 或「停止」按钮里 `clearInterval`。',
+      hints: [
+        '计时器在卸载时必须清理，与真实应用一致。',
+      ],
+    },
+    {
+      id: 'vue07-3',
+      title: '不在无关处叠监听',
+      relatedConcept: '副作用位置',
+      task: '避免在**每次**会反复调用的逻辑里 `addEventListener`；事件尽量写在 `template` 的 `@` 上，或只在 `onMounted` 里注册一次。',
+      hints: [
+        '副作用应挂在稳定生命周期，而不是会频繁重跑的路径里。',
+      ],
+    },
+  ],
+
+  'vue-08': [
+    {
+      id: 'vue08-1',
+      title: 'provide / inject',
+      relatedConcept: '依赖注入',
+      task: `在根 createApp 的 setup 里 使用 provide('theme', themeRef)、子组件用 inject 取并切换；key 可先用 string，生产环境建议 Symbol。`,
+      hints: [
+        '与把状态塞在「模块级变量」里比，`provide`/`inject` 更贴子树传配置的心智。',
+      ],
+    },
+    {
+      id: 'vue08-2',
+      title: 'useCounter composable',
+      relatedConcept: '可复用逻辑',
+      task: '写 `function useCounter(n0 = 0) { const n = ref(n0); ...; return { n, inc, reset } }`，在**两个**子组件/两次调用中各用一份，证明状态独立。',
+      hints: [
+        '每次 `useCounter()` 各有一份 `n`，即 composable 多实例独立。',
+      ],
+    },
+    {
+      id: 'vue08-3',
+      title: 'Router vs Pinia 一句话',
+      relatedConcept: '工程边界',
+      task: '在代码注释中各写**一句**：Router 解决什么问题、Pinia 解决什么问题；不必写具体 API（本题为概念）。',
+      hints: [
+        '一句概括 URL/视图/导航 与 跨组件业务状态/异步 的分工即可。',
       ],
     },
   ],

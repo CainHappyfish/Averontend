@@ -14,7 +14,7 @@ import { getLessonExercises } from './data/lessonExercises'
 import { lessons, moduleNameMap } from './data/lessons'
 import { getDocMarkdown, getDocSectionCountForLesson } from './data/moduleDocMarkdown'
 import type { Lesson, ModuleKey } from './types/lesson'
-import { buildSandboxDocument } from './sandbox/buildSandboxDocument'
+import { buildSandboxDocument, type SandboxRuntime } from './sandbox/buildSandboxDocument'
 import { transpileScript } from './sandbox/transpileScript'
 
 type EditorTab = 'html' | 'css' | 'js'
@@ -34,6 +34,19 @@ interface LessonDraft {
   js: string
 }
 
+type CommandSandboxState = 'offline' | 'ready' | 'running' | 'error'
+
+interface CommandSandboxExecResult {
+  command: string
+  exitCode: number
+  signal: string | null
+  stdout: string
+  stderr: string
+  timedOut: boolean
+  elapsedMs: number
+  workspaceDir: string
+}
+
 const selectedLessonId = ref(lessons[0]?.id ?? '')
 const docTab = ref<DocTab>('docs')
 const activeEditorTab = ref<EditorTab>('html')
@@ -42,6 +55,8 @@ const cssCode = ref('')
 const jsCode = ref('')
 const previewDoc = ref('')
 const previewFrame = ref<HTMLIFrameElement | null>(null)
+/** 沙箱以 Blob URL 独立导航，换稿时释放上一 URL 避免泄露 */
+let sandboxBlobUrl: string | null = null
 const docsContainerRef = ref<HTMLElement | null>(null)
 const consoleLogs = ref<string[]>([])
 const runtimeState = ref<'idle' | 'running' | 'success' | 'error'>('idle')
@@ -49,6 +64,151 @@ const autoRunEnabled = ref(true)
 const isHydratingLesson = ref(false)
 const cleanTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const activeExerciseId = ref('')
+
+/** 与仓库根 package.json 中的脚本一致，供在「本机终端」复现完整 npm 工作流 */
+const localNpmCommands =
+  'cd Averontend\nnpm install\nnpm run dev\n'
+const copyNpmHint = ref(false)
+const copyLocalNpmCommands = async () => {
+  try {
+    await navigator.clipboard.writeText(localNpmCommands)
+    copyNpmHint.value = true
+    window.setTimeout(() => {
+      copyNpmHint.value = false
+    }, 2200)
+  } catch {
+    console.warn('[Averontend] 无法写入剪贴板，请手选终端命令')
+  }
+}
+
+const commandSandboxState = ref<CommandSandboxState>('offline')
+const commandSandboxSessionId = ref('')
+const commandSandboxWorkspace = ref('')
+const commandSandboxCommand = ref('npm run build')
+const commandSandboxOutput = ref('命令输出会显示在这里。')
+const commandSandboxError = ref('')
+const commandSandboxBusy = ref(false)
+
+const commandSandboxStatusLabel = computed(() => {
+  if (commandSandboxState.value === 'running') return '执行中'
+  if (commandSandboxState.value === 'ready') return commandSandboxSessionId.value ? '已就绪' : '服务在线'
+  if (commandSandboxState.value === 'error') return '命令失败'
+  return '服务离线'
+})
+
+const sandboxFetch = async <T>(input: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(input, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  })
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : `请求失败（${response.status}）`)
+  }
+  return payload as T
+}
+
+const probeCommandSandbox = async () => {
+  try {
+    await sandboxFetch<{ ok: boolean }>('/api/sandbox/status', { method: 'GET' })
+    commandSandboxState.value = commandSandboxSessionId.value ? 'ready' : 'ready'
+    commandSandboxError.value = ''
+    if (!commandSandboxSessionId.value) {
+      commandSandboxOutput.value = '命令沙箱在线。输入命令后可直接“初始化并执行”。'
+    }
+  } catch (error) {
+    commandSandboxState.value = 'offline'
+    commandSandboxError.value = error instanceof Error ? error.message : String(error)
+    commandSandboxOutput.value =
+      '命令沙箱服务未启动。请使用 `npm run dev`（已同时启动前端与 sandbox-server），或单独执行 `npm run sandbox:server`。'
+  }
+}
+
+const destroyCommandSandboxSession = async () => {
+  if (!commandSandboxSessionId.value) return
+  const id = commandSandboxSessionId.value
+  commandSandboxSessionId.value = ''
+  commandSandboxWorkspace.value = ''
+  try {
+    await sandboxFetch<{ ok: boolean }>(`/api/sandbox/sessions/${id}`, { method: 'DELETE' })
+  } catch {
+    // 页面关闭或 dev server 退出时无需阻塞卸载流程
+  }
+}
+
+const ensureCommandSandboxSession = async () => {
+  if (commandSandboxSessionId.value) return
+  const data = await sandboxFetch<{ id: string; workspaceDir: string }>('/api/sandbox/sessions', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+  commandSandboxSessionId.value = data.id
+  commandSandboxWorkspace.value = data.workspaceDir
+  commandSandboxState.value = 'ready'
+  commandSandboxError.value = ''
+}
+
+const resetCommandSandboxSession = async () => {
+  commandSandboxBusy.value = true
+  commandSandboxError.value = ''
+  try {
+    await destroyCommandSandboxSession()
+    await ensureCommandSandboxSession()
+    commandSandboxOutput.value = '已重置 Docker 命令沙箱，会话工作区为当前仓库的一份隔离拷贝。'
+  } catch (error) {
+    commandSandboxState.value = 'offline'
+    commandSandboxError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    commandSandboxBusy.value = false
+  }
+}
+
+const runCommandInSandbox = async () => {
+  const command = commandSandboxCommand.value.trim()
+  if (!command) return
+  commandSandboxBusy.value = true
+  commandSandboxError.value = ''
+  commandSandboxState.value = 'running'
+  commandSandboxOutput.value = `$ ${command}\n\n[system] Docker 命令沙箱执行中...`
+  try {
+    await ensureCommandSandboxSession()
+    const result = await sandboxFetch<CommandSandboxExecResult>(
+      `/api/sandbox/sessions/${commandSandboxSessionId.value}/exec`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          command,
+          timeoutMs: 120000,
+        }),
+      },
+    )
+    commandSandboxWorkspace.value = result.workspaceDir
+    commandSandboxState.value = result.exitCode === 0 ? 'ready' : 'error'
+    commandSandboxOutput.value = [
+      `$ ${result.command}`,
+      '',
+      result.stdout.trimEnd(),
+      result.stderr.trimEnd(),
+      `[exit ${result.exitCode}] ${result.elapsedMs} ms${result.timedOut ? '（超时已终止）' : ''}`,
+    ]
+      .filter(Boolean)
+      .join('\n')
+  } catch (error) {
+    commandSandboxState.value = 'error'
+    commandSandboxError.value = error instanceof Error ? error.message : String(error)
+    commandSandboxOutput.value = [
+      `$ ${command}`,
+      '',
+      '[ERROR] 命令沙箱执行失败。',
+      commandSandboxError.value,
+    ].join('\n')
+  } finally {
+    commandSandboxBusy.value = false
+  }
+}
 
 const currentExercises = computed(() =>
   selectedLesson.value ? getLessonExercises(selectedLesson.value.id) : [],
@@ -70,6 +230,7 @@ const LEGACY_LESSON_IDS: Record<string, string> = {
   'html-card': 'ch1-html',
   'vite-script': 'eng-01',
   'ts-user': 'ts-01',
+  'vue-mind': 'vue-01',
 }
 
 const normalizeStoredLessonId = (id: string) => LEGACY_LESSON_IDS[id] ?? id
@@ -304,7 +465,9 @@ const activeCode = computed({
 const activeEditorLanguage = computed(() => {
   if (activeEditorTab.value === 'html') return 'html'
   if (activeEditorTab.value === 'css') return 'css'
-  return selectedLesson.value?.scriptLanguage === 'typescript' ? 'typescript' : 'javascript'
+  if (selectedLesson.value?.scriptLanguage === 'typescript') return 'typescript'
+  if (selectedLesson.value?.scriptLanguage === 'vue') return 'typescript'
+  return 'javascript'
 })
 
 const readDrafts = (): Record<string, LessonDraft> => {
@@ -327,10 +490,14 @@ const persistDraft = () => {
 const renderPreview = async (doc: string) => {
   await nextTick()
   const frame = previewFrame.value
-  if (!frame?.contentDocument) return
-  frame.contentDocument.open()
-  frame.contentDocument.write(doc)
-  frame.contentDocument.close()
+  if (!frame) return
+  const prev = sandboxBlobUrl
+  const nextUrl = URL.createObjectURL(
+    new Blob([doc], { type: 'text/html;charset=utf-8' }),
+  )
+  frame.setAttribute('src', nextUrl)
+  sandboxBlobUrl = nextUrl
+  if (prev) URL.revokeObjectURL(prev)
 }
 
 const runCode = async () => {
@@ -350,23 +517,26 @@ const runCode = async () => {
   runtimeState.value = 'running'
   consoleLogs.value = ['[system] 代码执行中...']
   try {
-    const script = await transpileScript(
-      jsCode.value,
-      selectedLesson.value?.scriptLanguage ?? 'javascript',
-    )
+    const lang = selectedLesson.value?.scriptLanguage ?? 'javascript'
+    const script = await transpileScript(jsCode.value, lang)
     if (ticket !== runTicket) return
+    const runtime: SandboxRuntime = lang === 'vue' ? 'vue3' : 'vanilla'
     previewDoc.value = buildSandboxDocument({
       html: htmlCode.value,
       css: cssCode.value,
       js: script,
+      runtime,
     })
   } catch (error) {
     if (ticket !== runTicket) return
     runtimeState.value = 'error'
+    const lang = selectedLesson.value?.scriptLanguage ?? 'javascript'
+    const runtime: SandboxRuntime = lang === 'vue' ? 'vue3' : 'vanilla'
     previewDoc.value = buildSandboxDocument({
       html: htmlCode.value,
       css: cssCode.value,
       js: '',
+      runtime,
     })
     consoleLogs.value.push(`[ERROR] 编译失败：${error instanceof Error ? error.message : String(error)}`)
   }
@@ -536,6 +706,7 @@ const onSandboxMessage = (event: MessageEvent) => {
 
 onMounted(() => {
   window.addEventListener('message', onSandboxMessage)
+  void probeCommandSandbox()
   const cached = localStorage.getItem(LAST_LESSON_KEY)
   const normalized = cached ? normalizeStoredLessonId(cached) : null
   if (cached && normalized && cached !== normalized) {
@@ -550,6 +721,11 @@ onUnmounted(() => {
   window.removeEventListener('message', onSandboxMessage)
   if (autoRunTimer) clearTimeout(autoRunTimer)
   if (cleanTimer.value) clearTimeout(cleanTimer.value)
+  void destroyCommandSandboxSession()
+  if (sandboxBlobUrl) {
+    URL.revokeObjectURL(sandboxBlobUrl)
+    sandboxBlobUrl = null
+  }
   while (scrollbarCleanupFns.length > 0) scrollbarCleanupFns.pop()?.()
 })
 
@@ -872,7 +1048,13 @@ const runtimeLabelMap = {
                 :class="{ active: activeEditorTab === 'js' }"
                 @click="activeEditorTab = 'js'"
               >
-                {{ selectedLesson?.scriptLanguage === 'typescript' ? 'TS' : 'JS' }}
+                {{
+                selectedLesson?.scriptLanguage === 'typescript'
+                  ? 'TS'
+                  : selectedLesson?.scriptLanguage === 'vue'
+                    ? 'Vue 3'
+                    : 'JS'
+              }}
               </button>
             </div>
 
@@ -884,7 +1066,11 @@ const runtimeLabelMap = {
 
           <div class="code-body">
             <div class="editor-wrap">
-              <MonacoEditor v-model="activeCode" :language="activeEditorLanguage" />
+              <MonacoEditor
+                v-model="activeCode"
+                :language="activeEditorLanguage"
+                :ts-global-inject="selectedLesson?.scriptLanguage === 'vue' ? 'vue' : 'none'"
+              />
             </div>
             <div class="hint-floating" data-scrollbar>
               <template v-if="currentExercise">
@@ -927,13 +1113,119 @@ const runtimeLabelMap = {
               <input v-model="autoRunEnabled" type="checkbox" />
               <span>实时预览</span>
             </label>
-            <span class="chip">{{ selectedLesson?.scriptLanguage === 'typescript' ? 'TS' : 'JS' }}</span>
+            <span class="chip">{{
+                selectedLesson?.scriptLanguage === 'typescript'
+                  ? 'TS'
+                  : selectedLesson?.scriptLanguage === 'vue'
+                    ? 'Vue 3'
+                    : 'JS'
+              }}</span>
             <span class="chip" :class="runtimeState">{{ runtimeLabelMap[runtimeState] }}</span>
           </div>
         </header>
 
+        <details
+          v-if="lessonNeedsSandbox"
+          class="local-npm-details"
+        >
+          <summary class="local-npm-summary">本机终端：npm 与 Node</summary>
+          <div class="local-npm-body">
+            <p class="local-npm-lead">
+              浏览器内<strong>无法</strong>代你执行
+              <code>npm</code> / <code>node</code> / 安装包；当前「页面预览」只在隔离
+              <code>iframe</code> 里跑已加载的页面脚本。依赖安装、Vite/构建请在<strong>本机</strong>终端执行（需已装
+              <a
+                href="https://nodejs.org/"
+                target="_blank"
+                rel="noreferrer noopener"
+              >Node.js</a>）。
+            </p>
+            <p
+              v-if="copyNpmHint"
+              class="local-npm-copied"
+              role="status"
+            >
+              已复制到剪贴板
+            </p>
+            <pre class="local-npm-snippet"><code>{{ localNpmCommands.trimEnd() }}</code></pre>
+            <button
+              type="button"
+              class="code-btn-run local-npm-copy"
+              @click="void copyLocalNpmCommands()"
+            >
+              复制上述命令
+            </button>
+          </div>
+        </details>
+
+        <details
+          v-if="lessonNeedsSandbox"
+          class="command-sandbox-details"
+          open
+        >
+          <summary class="local-npm-summary">命令沙箱（Docker）</summary>
+          <div class="command-sandbox-body">
+            <p class="command-sandbox-lead">
+              这里会在本机 Docker 容器里执行命令，工作目录是当前仓库的一份<strong>隔离拷贝</strong>。适合
+              <code>npm install</code>、<code>npm run build</code> 这类<strong>非交互</strong>命令。
+            </p>
+            <p class="command-sandbox-meta">
+              状态：{{ commandSandboxStatusLabel }}
+              <template v-if="commandSandboxWorkspace">
+                · 工作区：<code>{{ commandSandboxWorkspace }}</code>
+              </template>
+            </p>
+            <div class="command-sandbox-toolbar">
+              <button
+                type="button"
+                class="code-btn-reset"
+                :disabled="commandSandboxBusy"
+                @click="void resetCommandSandboxSession()"
+              >
+                重置会话
+              </button>
+              <button
+                type="button"
+                class="code-btn-run"
+                :disabled="commandSandboxBusy || commandSandboxState === 'offline' || !commandSandboxCommand.trim()"
+                @click="void runCommandInSandbox()"
+              >
+                {{ commandSandboxBusy ? '执行中...' : commandSandboxSessionId ? '执行命令' : '初始化并执行' }}
+              </button>
+            </div>
+            <input
+              v-model="commandSandboxCommand"
+              class="command-sandbox-input"
+              type="text"
+              placeholder="例如：npm run build"
+              @keyup.enter.exact.prevent="void runCommandInSandbox()"
+            />
+            <p class="command-sandbox-note">
+              长驻命令如 <code>npm run dev</code> 当前不会自动转发端口到右侧预览；更适合安装依赖、构建、测试等一次性命令。
+            </p>
+            <p class="command-sandbox-note">
+              首次执行若本机没有镜像，会尝试拉取 <code>node:22-bookworm</code>；若 Docker Hub 网络不通，请先手动
+              <code>docker pull node:22-bookworm</code>。
+            </p>
+            <p
+              v-if="commandSandboxError"
+              class="command-sandbox-error"
+              role="status"
+            >
+              {{ commandSandboxError }}
+            </p>
+            <pre class="command-sandbox-output"><code>{{ commandSandboxOutput }}</code></pre>
+          </div>
+        </details>
+
         <div class="preview-frame-wrap">
-          <iframe ref="previewFrame" title="sandbox-preview" sandbox="allow-scripts allow-same-origin"></iframe>
+          <iframe
+            ref="previewFrame"
+            title="preview-sandbox"
+            class="preview-sandbox-frame"
+            sandbox="allow-scripts"
+            referrerpolicy="no-referrer"
+          ></iframe>
         </div>
 
         <div class="console-block">

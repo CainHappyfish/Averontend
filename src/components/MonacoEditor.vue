@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import loader from '@monaco-editor/loader'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { getVueInjectedMonacoExtraLibDts } from '../sandbox/vueInjectedGlobals'
 
 interface Props {
   modelValue: string
   language: string
+  /** 为 Vue 沙箱课注入与预览一致的 `createApp`/`ref` 等全局类型，消除 2304 误报 */
+  tsGlobalInject?: 'vue' | 'none'
 }
 
 const props = defineProps<Props>()
@@ -16,6 +19,20 @@ const hostRef = ref<HTMLElement | null>(null)
 let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
 let monaco: typeof import('monaco-editor') | null = null
 let changeDisposer: import('monaco-editor').IDisposable | null = null
+const EXTRA_LIB_VUE = 'file:///inmemory/averontend-vue-sandbox.d.ts'
+let extraLibDisposer: import('monaco-editor').IDisposable | null = null
+
+const syncTypeScriptGlobalInject = (inject: 'vue' | 'none' | undefined) => {
+  if (!monaco) return
+  extraLibDisposer?.dispose()
+  extraLibDisposer = null
+  if (inject !== 'vue') return
+  // monaco 类型定义里对 languages.typescript 标为弃用，运行时 API 仍可用
+  const ts = monaco.languages.typescript as unknown as {
+    typescriptDefaults: { addExtraLib: (c: string, p: string) => import('monaco-editor').IDisposable }
+  }
+  extraLibDisposer = ts.typescriptDefaults.addExtraLib(getVueInjectedMonacoExtraLibDts(), EXTRA_LIB_VUE)
+}
 
 const THEME_ID = 'averontend-dark'
 
@@ -61,8 +78,23 @@ onMounted(async () => {
     roundedSelection: false,
     padding: { top: 12, bottom: 8 },
     lineNumbersMinChars: 2,
+    hover: {
+      enabled: true,
+      /** 略增延迟，减少划过每一标识符都闪 tooltip */
+      delay: 400,
+      /** 可移入浮层，便于阅读多行与点击 Quick Fix */
+      sticky: true,
+    },
+    /**
+     * 将补全/悬停等溢出层挂到 body，避免被 .code-surface 等 `overflow: hidden` 父级裁切。
+     * 与 `fixedOverflowWidgets` 同开，以兼容不同小部件的挂载方式。
+     */
+    fixedOverflowWidgets: true,
+    overflowWidgetsDomNode: document.body,
   })
   editor = editorInstance
+
+  syncTypeScriptGlobalInject(props.tsGlobalInject)
 
   changeDisposer = editorInstance.onDidChangeModelContent(() => {
     emit('update:modelValue', editorInstance.getValue())
@@ -88,8 +120,17 @@ watch(
   },
 )
 
+watch(
+  () => props.tsGlobalInject,
+  (inject) => {
+    syncTypeScriptGlobalInject(inject)
+  },
+)
+
 onBeforeUnmount(() => {
   changeDisposer?.dispose()
+  extraLibDisposer?.dispose()
+  extraLibDisposer = null
   editor?.dispose()
 })
 </script>
