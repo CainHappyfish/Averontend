@@ -14,9 +14,18 @@ const spawnChild = (command: string, args: string[]) =>
   })
 
 const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const sandboxDevPort = process.env.SANDBOX_PORT ?? '4274'
 
 // 后端使用 tsx watch，修改 Koa/认证/沙箱文件后会自动重启。
-const sandbox = spawnChild(tsxBin, ['watch', '--clear-screen=false', 'sandbox-server/server.ts'])
+const sandbox = spawn(tsxBin, ['watch', '--clear-screen=false', 'sandbox-server/server.ts'], {
+  cwd: repoRoot,
+  stdio: 'inherit',
+  env: {
+    ...process.env,
+    // dev 默认避开 4273，减少与已运行实例冲突；仍可通过 SANDBOX_PORT 覆盖。
+    SANDBOX_PORT: sandboxDevPort,
+  },
+})
 const vite = spawnChild(npmBin, ['run', 'dev:web'])
 
 const shutdown = (code = 0) => {

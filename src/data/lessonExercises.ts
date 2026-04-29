@@ -843,6 +843,42 @@ export const lessonExercisesByLessonId: Record<string, LessonExercise[]> = {
       ],
     },
   ],
+
+  'practice-01': [
+    {
+      id: 'vuep01-1',
+      scope: 'focus',
+      title: '项目初始化与运行记录',
+      relatedConcept: '工程启动链路',
+      task: '克隆目标仓库后完成依赖安装与启动，把可复现步骤整理成 5 行以内（Node 版本、安装命令、启动命令、常见报错与处理）。',
+      hints: [
+        '优先先跑通，再重构；不要一开始就大改目录结构。',
+        '遇到依赖冲突先锁定 Node 版本，再清理重装。',
+      ],
+    },
+    {
+      id: 'vuep01-2',
+      scope: 'focus',
+      title: '最小业务闭环',
+      relatedConcept: '路由 + 状态 + 页面联动',
+      task: '打通登录页 -> 主布局 -> 至少 1 个业务列表页，要求：路由守卫生效、登录态可持久化、页面能拉取并展示数据（可 mock）。',
+      hints: [
+        '先做最小闭环再补细节，保证演示路径可走通。',
+        '列表页优先可读可测：筛选、分页等可分批补齐。',
+      ],
+    },
+    {
+      id: 'vuep01-3',
+      scope: 'synthesis',
+      title: '项目复盘文档',
+      relatedConcept: '模块拆分与工程表达',
+      task: '提交一份项目说明：目录结构、核心模块职责、你完成的功能、已知问题、下一步计划。可放仓库 README 或 docs 目录。',
+      hints: [
+        '重点写“为什么这样拆分”，不仅是“做了什么”。',
+        '复盘要让别人能接手，因此要包含运行方式与风险说明。',
+      ],
+    },
+  ],
 }
 
 export const getLessonExercises = (lessonId: string) => lessonExercisesByLessonId[lessonId] ?? []

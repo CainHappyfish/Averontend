@@ -49,6 +49,14 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS user_progress (
+    user_id TEXT PRIMARY KEY,
+    completed_lesson_ids TEXT NOT NULL,
+    visited_lesson_ids TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
   CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at);
   CREATE INDEX IF NOT EXISTS idx_sandbox_sessions_expires_at ON sandbox_sessions(expires_at);
@@ -89,6 +97,20 @@ export interface SandboxSessionRecord {
   expiresAt: number
 }
 
+export interface UserProgressRecord {
+  userId: string
+  completedLessonIds: string[]
+  visitedLessonIds: string[]
+  updatedAt: number
+}
+
+interface UserProgressRow {
+  userId: string
+  completedLessonIds: string
+  visitedLessonIds: string
+  updatedAt: number
+}
+
 const normalizeUsername = (value: string) => value.trim().toLowerCase()
 
 const hashPassword = (password: string, salt: string) => scryptSync(password, salt, 64).toString('hex')
@@ -105,6 +127,37 @@ const verifyPassword = (password: string, passwordSalt: string, passwordHash: st
   const expected = Buffer.from(passwordHash, 'hex')
   const actual = Buffer.from(hashPassword(password, passwordSalt), 'hex')
   return expected.length === actual.length && timingSafeEqual(expected, actual)
+}
+
+const parseStoredLessonIds = (raw: string | undefined) => {
+  try {
+    const parsed = JSON.parse(raw ?? '[]')
+    if (!Array.isArray(parsed)) return []
+    return [...new Set(parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0))]
+  } catch {
+    return []
+  }
+}
+
+const toProgressRecord = (row: UserProgressRow | undefined, userId: string): UserProgressRecord => {
+  if (!row) {
+    return {
+      userId,
+      completedLessonIds: [],
+      visitedLessonIds: [],
+      updatedAt: 0,
+    }
+  }
+
+  const completedLessonIds = parseStoredLessonIds(row.completedLessonIds)
+  const visitedLessonIds = [...new Set([...parseStoredLessonIds(row.visitedLessonIds), ...completedLessonIds])]
+
+  return {
+    userId: row.userId,
+    completedLessonIds,
+    visitedLessonIds,
+    updatedAt: row.updatedAt,
+  }
 }
 
 const statements = {
@@ -221,6 +274,23 @@ const statements = {
       expires_at AS expiresAt
     FROM sandbox_sessions
   `),
+  getUserProgress: db.prepare(`
+    SELECT
+      user_id AS userId,
+      completed_lesson_ids AS completedLessonIds,
+      visited_lesson_ids AS visitedLessonIds,
+      updated_at AS updatedAt
+    FROM user_progress
+    WHERE user_id = ?
+  `),
+  upsertUserProgress: db.prepare(`
+    INSERT INTO user_progress (user_id, completed_lesson_ids, visited_lesson_ids, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      completed_lesson_ids = excluded.completed_lesson_ids,
+      visited_lesson_ids = excluded.visited_lesson_ids,
+      updated_at = excluded.updated_at
+  `),
 }
 
 export const authDbPath = dbPath
@@ -240,7 +310,7 @@ export const createUser = (username: string, password: string): UserRecord => {
 
 export const verifyUserCredentials = (username: string, password: string): UserRecord | null => {
   const normalized = normalizeUsername(String(username ?? ''))
-  const user = statements.getUserByUsername.get(normalized) as UserPasswordRecord | undefined
+  const user = statements.getUserByUsername.get(normalized) as unknown as UserPasswordRecord | undefined
   if (!user) return null
   if (!verifyPassword(String(password ?? ''), user.passwordSalt, user.passwordHash)) return null
   return {
@@ -265,7 +335,7 @@ export const createAuthSession = (userId: string, ttlMs: number) => {
 
 export const getAuthSessionUser = (sessionId: string | undefined): AuthSessionRecord | null => {
   if (!sessionId) return null
-  return (statements.getAuthSessionWithUser.get(sessionId) as AuthSessionRecord | undefined) ?? null
+  return (statements.getAuthSessionWithUser.get(sessionId) as unknown as AuthSessionRecord | undefined) ?? null
 }
 
 export const touchAuthSession = (sessionId: string, ttlMs: number) => {
@@ -283,10 +353,14 @@ export const deleteExpiredAuthSessions = (now = Date.now()) => {
 }
 
 export const getSandboxSessionRecordById = (id: string | undefined): SandboxSessionRecord | null =>
-  (id ? ((statements.getSandboxSessionById.get(id) as SandboxSessionRecord | undefined) ?? null) : null)
+  (id
+    ? ((statements.getSandboxSessionById.get(id) as unknown as SandboxSessionRecord | undefined) ?? null)
+    : null)
 
 export const getSandboxSessionRecordByUserId = (userId: string | undefined): SandboxSessionRecord | null =>
-  userId ? ((statements.getSandboxSessionByUserId.get(userId) as SandboxSessionRecord | undefined) ?? null) : null
+  userId
+    ? ((statements.getSandboxSessionByUserId.get(userId) as unknown as SandboxSessionRecord | undefined) ?? null)
+    : null
 
 export const upsertSandboxSessionRecord = (record: SandboxSessionRecord) => {
   statements.upsertSandboxSession.run(
@@ -327,3 +401,28 @@ export const listExpiredSandboxSessionRecords = (now: number, idleTimeoutMs: num
   ((statements.listSandboxSessions.all() as unknown as SandboxSessionRecord[]) ?? []).filter(
     (record) => now >= record.expiresAt || now - record.lastActiveAt >= idleTimeoutMs,
   )
+
+export const getUserProgress = (userId: string): UserProgressRecord =>
+  toProgressRecord(statements.getUserProgress.get(userId) as unknown as UserProgressRow | undefined, userId)
+
+export const saveUserProgress = (
+  userId: string,
+  completedLessonIds: string[],
+  visitedLessonIds: string[],
+): UserProgressRecord => {
+  const normalizedCompleted = parseStoredLessonIds(JSON.stringify(completedLessonIds))
+  const normalizedVisited = [...new Set([...parseStoredLessonIds(JSON.stringify(visitedLessonIds)), ...normalizedCompleted])]
+  const updatedAt = Date.now()
+  statements.upsertUserProgress.run(
+    userId,
+    JSON.stringify(normalizedCompleted),
+    JSON.stringify(normalizedVisited),
+    updatedAt,
+  )
+  return {
+    userId,
+    completedLessonIds: normalizedCompleted,
+    visitedLessonIds: normalizedVisited,
+    updatedAt,
+  }
+}

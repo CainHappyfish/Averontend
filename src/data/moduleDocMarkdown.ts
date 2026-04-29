@@ -24,6 +24,13 @@ import vue05Doc from '../content/docs/vue/vue-05.md?raw'
 import vue06Doc from '../content/docs/vue/vue-06.md?raw'
 import vue07Doc from '../content/docs/vue/vue-07.md?raw'
 import vue08Doc from '../content/docs/vue/vue-08.md?raw'
+import node01Doc from '../content/docs/nodejs/node-01-frontend-backend-tool.md?raw'
+import node02Doc from '../content/docs/nodejs/node-02-scripts.md?raw'
+import node03Doc from '../content/docs/nodejs/node-03-http-api.md?raw'
+import node04Doc from '../content/docs/nodejs/node-04-koa-basic.md?raw'
+import node05Doc from '../content/docs/nodejs/node-05-koa-crud.md?raw'
+import node06Doc from '../content/docs/nodejs/node-06-bff-mock-deploy.md?raw'
+import practice01Doc from '../content/docs/vue-practice/vue-practice-01-manage-system-demo.md?raw'
 
 export const moduleDocMarkdownMap: Record<ModuleKey, string> = {
   /** 当无法按节命中时使用（不应长期依赖，仅兜底） */
@@ -32,6 +39,8 @@ export const moduleDocMarkdownMap: Record<ModuleKey, string> = {
   engineering: eng01Doc,
   typescript: ts01Doc,
   vue: vue01Doc,
+  nodejs: node01Doc,
+  practice: practice01Doc,
 }
 
 const vueByLessonId: Record<string, string> = {
@@ -43,6 +52,19 @@ const vueByLessonId: Record<string, string> = {
   'vue-06': vue06Doc,
   'vue-07': vue07Doc,
   'vue-08': vue08Doc,
+}
+
+const practiceByLessonId: Record<string, string> = {
+  'practice-01': practice01Doc,
+}
+
+const nodejsByLessonId: Record<string, string> = {
+  'node-01': node01Doc,
+  'node-02': node02Doc,
+  'node-03': node03Doc,
+  'node-04': node04Doc,
+  'node-05': node05Doc,
+  'node-06': node06Doc,
 }
 
 /** 多模块下：子课 id 与文档一一对应（basics / improve / engineering / typescript） */
@@ -90,6 +112,12 @@ export const getDocMarkdown = (lesson: Lesson | undefined): string => {
   }
   if (lesson && lesson.module === 'vue' && vueByLessonId[lesson.id]) {
     return vueByLessonId[lesson.id]
+  }
+  if (lesson && lesson.module === 'nodejs' && nodejsByLessonId[lesson.id]) {
+    return nodejsByLessonId[lesson.id]
+  }
+  if (lesson && lesson.module === 'practice' && practiceByLessonId[lesson.id]) {
+    return practiceByLessonId[lesson.id]
   }
   if (!lesson) return moduleDocMarkdownMap.basics
   return moduleDocMarkdownMap[lesson.module]

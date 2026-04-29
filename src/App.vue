@@ -61,6 +61,13 @@ interface AuthUser {
   createdAt: number
 }
 
+interface UserProgressPayload {
+  userId: string
+  completedLessonIds: string[]
+  visitedLessonIds: string[]
+  updatedAt: number
+}
+
 const ANSI_ESCAPE_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
 
 const stripAnsi = (value: string) => value.replace(ANSI_ESCAPE_RE, '').replace(/\u0007/g, '')
@@ -291,8 +298,8 @@ const authSwitchLabel = computed(() =>
 
 const DRAFT_STORAGE_KEY = 'averontend:lesson-drafts'
 const LAST_LESSON_KEY = 'averontend:last-lesson-id'
-const COMPLETED_KEY = 'averontend:completed-lesson-ids'
-const VISITED_KEY = 'averontend:visited-lesson-ids'
+const LEGACY_COMPLETED_KEY = 'averontend:completed-lesson-ids'
+const LEGACY_VISITED_KEY = 'averontend:visited-lesson-ids'
 
 /** 旧站课程 id 迁移（localStorage 里仍可能存着旧值） */
 const LEGACY_LESSON_IDS: Record<string, string> = {
@@ -303,62 +310,123 @@ const LEGACY_LESSON_IDS: Record<string, string> = {
 }
 
 const normalizeStoredLessonId = (id: string) => LEGACY_LESSON_IDS[id] ?? id
+const lessonOrderIndex = new Map(lessons.map((lesson, index) => [lesson.id, index]))
+const validLessonIds = new Set(lessons.map((lesson) => lesson.id))
 
-const readCompletedIds = (): Set<string> => {
+const sortLessonIds = (ids: Iterable<string>) =>
+  [...new Set(ids)]
+    .filter((id) => validLessonIds.has(id))
+    .sort((a, b) => (lessonOrderIndex.get(a) ?? Number.MAX_SAFE_INTEGER) - (lessonOrderIndex.get(b) ?? Number.MAX_SAFE_INTEGER))
+
+const parseStoredLessonIds = (raw: string | null) => {
   try {
-    const raw = localStorage.getItem(COMPLETED_KEY)
-    if (!raw) return new Set()
-    const arr = JSON.parse(raw) as string[]
-    const out = new Set<string>()
-    let changed = false
-    for (const id of arr) {
-      const n = normalizeStoredLessonId(id)
-      if (n !== id) changed = true
-      out.add(n)
-    }
-    if (changed) {
-      localStorage.setItem(COMPLETED_KEY, JSON.stringify([...out]))
-    }
-    return out
+    const parsed = JSON.parse(raw ?? '[]')
+    if (!Array.isArray(parsed)) return []
+    return sortLessonIds(parsed.map((id) => normalizeStoredLessonId(String(id ?? ''))))
   } catch {
-    return new Set()
+    return []
   }
 }
 
-const readVisitedIds = (): Set<string> => {
-  try {
-    const raw = localStorage.getItem(VISITED_KEY)
-    if (!raw) return new Set()
-    const arr = JSON.parse(raw) as string[]
-    const out = new Set<string>()
-    let changed = false
-    for (const id of arr) {
-      const n = normalizeStoredLessonId(id)
-      if (n !== id) changed = true
-      out.add(n)
-    }
-    if (changed) {
-      localStorage.setItem(VISITED_KEY, JSON.stringify([...out]))
-    }
-    return out
-  } catch {
-    return new Set()
+const getProgressStorageKeys = (userId: string) => ({
+  completed: `averontend:progress:${userId}:completed-lesson-ids`,
+  visited: `averontend:progress:${userId}:visited-lesson-ids`,
+})
+
+const readStoredProgressForUser = (userId: string): UserProgressPayload => {
+  const keys = getProgressStorageKeys(userId)
+  const rawCompleted = localStorage.getItem(keys.completed)
+  const rawVisited = localStorage.getItem(keys.visited)
+  const rawLegacyCompleted = localStorage.getItem(LEGACY_COMPLETED_KEY)
+  const rawLegacyVisited = localStorage.getItem(LEGACY_VISITED_KEY)
+  const completedLessonIds = parseStoredLessonIds(rawCompleted ?? rawLegacyCompleted)
+  const visitedLessonIds = sortLessonIds([
+    ...parseStoredLessonIds(rawVisited ?? rawLegacyVisited),
+    ...completedLessonIds,
+  ])
+
+  if (!rawCompleted && rawLegacyCompleted) {
+    localStorage.setItem(keys.completed, JSON.stringify(completedLessonIds))
+  }
+  if (!rawVisited && rawLegacyVisited) {
+    localStorage.setItem(keys.visited, JSON.stringify(visitedLessonIds))
+  }
+  if (rawLegacyCompleted) localStorage.removeItem(LEGACY_COMPLETED_KEY)
+  if (rawLegacyVisited) localStorage.removeItem(LEGACY_VISITED_KEY)
+
+  return {
+    userId,
+    completedLessonIds,
+    visitedLessonIds,
+    updatedAt: 0,
   }
 }
 
-const completedLessonIds = ref<Set<string>>(readCompletedIds())
-const visitedLessonIds = ref<Set<string>>(readVisitedIds())
+const writeStoredProgressForUser = (userId: string, progress: Pick<UserProgressPayload, 'completedLessonIds' | 'visitedLessonIds'>) => {
+  const keys = getProgressStorageKeys(userId)
+  localStorage.setItem(keys.completed, JSON.stringify(sortLessonIds(progress.completedLessonIds)))
+  localStorage.setItem(keys.visited, JSON.stringify(sortLessonIds([...progress.visitedLessonIds, ...progress.completedLessonIds])))
+}
 
-const persistCompleted = () => {
-  localStorage.setItem(COMPLETED_KEY, JSON.stringify([...completedLessonIds.value]))
+const completedLessonIds = ref<Set<string>>(new Set())
+const visitedLessonIds = ref<Set<string>>(new Set())
+
+const applyProgressState = (progress: Pick<UserProgressPayload, 'completedLessonIds' | 'visitedLessonIds'>) => {
+  const completed = sortLessonIds(progress.completedLessonIds)
+  const visited = sortLessonIds([...progress.visitedLessonIds, ...completed])
+  completedLessonIds.value = new Set(completed)
+  visitedLessonIds.value = new Set(visited)
+}
+
+const persistProgressLocally = () => {
+  if (!authUser.value) return
+  writeStoredProgressForUser(authUser.value.id, {
+    completedLessonIds: [...completedLessonIds.value],
+    visitedLessonIds: [...visitedLessonIds.value],
+  })
+}
+
+let progressSyncTimer: ReturnType<typeof setTimeout> | null = null
+let progressHydrating = false
+
+const syncProgressState = async () => {
+  if (!authUser.value) return
+  const payload = {
+    completedLessonIds: sortLessonIds(completedLessonIds.value),
+    visitedLessonIds: sortLessonIds([...visitedLessonIds.value, ...completedLessonIds.value]),
+  }
+  const response = await sandboxFetch<{ ok: boolean; progress: UserProgressPayload }>('/api/progress', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+  applyProgressState(response.progress)
+  persistProgressLocally()
+}
+
+const scheduleProgressSync = () => {
+  if (!authUser.value || progressHydrating) return
+  if (progressSyncTimer) clearTimeout(progressSyncTimer)
+  progressSyncTimer = setTimeout(() => {
+    void syncProgressState().catch(() => {
+      // 本地缓存仍然保留，稍后下一次操作会再次触发同步
+    })
+  }, 320)
+}
+
+const commitProgressState = (nextCompleted: Iterable<string>, nextVisited: Iterable<string>) => {
+  applyProgressState({
+    completedLessonIds: sortLessonIds(nextCompleted),
+    visitedLessonIds: sortLessonIds(nextVisited),
+  })
+  persistProgressLocally()
+  scheduleProgressSync()
 }
 
 const markLessonVisited = (id: string) => {
   if (visitedLessonIds.value.has(id)) return
   const next = new Set(visitedLessonIds.value)
   next.add(id)
-  visitedLessonIds.value = next
-  localStorage.setItem(VISITED_KEY, JSON.stringify([...next]))
+  commitProgressState(completedLessonIds.value, next)
 }
 
 const getLessonPhase = (id: string): SubLessonPhase => {
@@ -380,8 +448,9 @@ const toggleLessonDone = (id: string) => {
   const next = new Set(completedLessonIds.value)
   if (next.has(id)) next.delete(id)
   else next.add(id)
-  completedLessonIds.value = next
-  persistCompleted()
+  const visited = new Set(visitedLessonIds.value)
+  visited.add(id)
+  commitProgressState(next, visited)
 }
 
 let autoRunTimer: ReturnType<typeof setTimeout> | null = null
@@ -389,7 +458,30 @@ let runTicket = 0
 const scrollbarCleanupFns: Array<() => void> = []
 
 const selectedLesson = computed(() => lessons.find((item) => item.id === selectedLessonId.value))
+const focusedMapModule = ref<ModuleKey>(selectedLesson.value?.module ?? 'basics')
 const lessonIndex = computed(() => lessons.findIndex((item) => item.id === selectedLessonId.value))
+const totalLessonCount = lessons.length
+const totalDocSectionCount = lessons.reduce((sum, lesson) => sum + getDocSectionCountForLesson(lesson), 0)
+const completedLessonCount = computed(() => completedLessonIds.value.size)
+const visitedLessonCount = computed(() => visitedLessonIds.value.size)
+const completedSectionCount = computed(() =>
+  lessons.reduce((sum, lesson) => sum + (completedLessonIds.value.has(lesson.id) ? getDocSectionCountForLesson(lesson) : 0), 0),
+)
+const courseProgressPercent = computed(() =>
+  totalLessonCount ? Math.round((completedLessonCount.value / totalLessonCount) * 100) : 0,
+)
+const courseProgressWidth = computed(() => `${courseProgressPercent.value}%`)
+const currentLessonDone = computed(() =>
+  selectedLesson.value ? completedLessonIds.value.has(selectedLesson.value.id) : false,
+)
+const currentLessonProgressText = computed(() => {
+  if (!selectedLesson.value) return '未开始'
+  return currentLessonDone.value
+    ? '已完成'
+    : visitedLessonIds.value.has(selectedLesson.value.id)
+      ? '进行中'
+      : '未开始'
+})
 /** 未写 `practiceRequiresSandbox` 时默认需要沙箱；工程化等课在本地完成练习 */
 const lessonNeedsSandbox = computed(
   () => selectedLesson.value?.practiceRequiresSandbox !== false,
@@ -545,7 +637,7 @@ const ch1PanelOpen = ref(true)
 /** 整块「课程地图」列表是否展开 */
 const mapCourseOpen = ref(true)
 
-const isBasicsModuleActive = computed(() => selectedLesson.value?.module === 'basics')
+const isBasicsModuleActive = computed(() => focusedMapModule.value === 'basics')
 
 /** 折叠态副标题：当前节标题（在第一章内）或首节课标题 */
 const basicsCardSubtitle = computed(() => {
@@ -590,21 +682,24 @@ const mapModuleOpen = ref<Record<MapSidebarModule, boolean>>({
   engineering: false,
   typescript: false,
   vue: false,
+  nodejs: false,
+  practice: false,
 })
 
 const activeOutlineId = ref<string | null>(null)
 
+const toggleCh1Panel = () => {
+  focusedMapModule.value = 'basics'
+  ch1PanelOpen.value = !ch1PanelOpen.value
+}
+
 const toggleMapModule = (m: MapSidebarModule) => {
+  focusedMapModule.value = m
   const next = { ...mapModuleOpen.value, [m]: !mapModuleOpen.value[m] }
   mapModuleOpen.value = next
 }
 
-const isLessonInModuleActive = (m: ModuleKey) => selectedLesson.value?.module === m
-
-const loadModuleFirstLesson = async (m: ModuleKey) => {
-  const list = getLessonsForModule(m)
-  if (list[0]) await loadLesson(list[0].id)
-}
+const isLessonInModuleActive = (m: ModuleKey) => focusedMapModule.value === m
 
 const activeCode = computed({
   get: () =>
@@ -707,9 +802,53 @@ const getInitialLessonId = () => {
   return (lessons.find((item) => item.id === (normalized ?? '')) ?? lessons[0]).id
 }
 
+const hydrateProgressState = async () => {
+  if (!authUser.value) {
+    applyProgressState({ completedLessonIds: [], visitedLessonIds: [] })
+    return
+  }
+
+  progressHydrating = true
+  try {
+    const local = readStoredProgressForUser(authUser.value.id)
+    const response = await sandboxFetch<{ ok: boolean; progress: UserProgressPayload }>('/api/progress', {
+      method: 'GET',
+    })
+    const merged: UserProgressPayload = {
+      userId: authUser.value.id,
+      completedLessonIds: sortLessonIds([
+        ...response.progress.completedLessonIds,
+        ...local.completedLessonIds,
+      ]),
+      visitedLessonIds: sortLessonIds([
+        ...response.progress.visitedLessonIds,
+        ...local.visitedLessonIds,
+        ...response.progress.completedLessonIds,
+        ...local.completedLessonIds,
+      ]),
+      updatedAt: response.progress.updatedAt,
+    }
+    applyProgressState(merged)
+    persistProgressLocally()
+    if (
+      merged.completedLessonIds.join(',') !== sortLessonIds(response.progress.completedLessonIds).join(',') ||
+      merged.visitedLessonIds.join(',') !== sortLessonIds(response.progress.visitedLessonIds).join(',')
+    ) {
+      await syncProgressState()
+    }
+  } catch {
+    const local = readStoredProgressForUser(authUser.value.id)
+    applyProgressState(local)
+    persistProgressLocally()
+  } finally {
+    progressHydrating = false
+  }
+}
+
 const initializeAuthedApp = async () => {
   if (appBootstrapped.value) return
   await probeCommandSandbox()
+  await hydrateProgressState()
   await loadLesson(getInitialLessonId())
   await nextTick()
   setupSmartScrollbars()
@@ -762,6 +901,10 @@ const toggleAuthMode = () => {
 
 const logout = async () => {
   authBusy.value = true
+  if (progressSyncTimer) {
+    clearTimeout(progressSyncTimer)
+    progressSyncTimer = null
+  }
   try {
     await destroyCommandSandboxSession()
     await sandboxFetch<{ ok: boolean }>('/api/auth/logout', {
@@ -777,6 +920,7 @@ const logout = async () => {
   authPassword.value = ''
   authError.value = ''
   appBootstrapped.value = false
+  applyProgressState({ completedLessonIds: [], visitedLessonIds: [] })
   commandSandboxState.value = 'ready'
   commandSandboxOutput.value = '终端输出会显示在这里。'
   commandSandboxError.value = ''
@@ -1213,6 +1357,7 @@ const loadLesson = async (lessonId: string) => {
   const exs = getLessonExercises(lesson.id)
   isHydratingLesson.value = true
   selectedLessonId.value = lesson.id
+  focusedMapModule.value = lesson.module
   activeExerciseId.value = exs[0]?.id ?? ''
   if (isSwitchingLesson) {
     await destroyCommandSandboxSession()
@@ -1264,6 +1409,11 @@ const resetLesson = async () => {
   isHydratingLesson.value = false
   persistDraft()
   await runCode()
+}
+
+const toggleSelectedLessonDone = () => {
+  if (!selectedLesson.value) return
+  toggleLessonDone(selectedLesson.value.id)
 }
 
 const selectExercise = async (id: string) => {
@@ -1523,7 +1673,7 @@ const runtimeLabelMap = {
                   type="button"
                   class="map-ch1-group-head"
                   :aria-expanded="ch1PanelOpen"
-                  @click="ch1PanelOpen = !ch1PanelOpen"
+                  @click="toggleCh1Panel"
                 >
                   <span
                     class="map-item-icon"
@@ -1584,8 +1734,17 @@ const runtimeLabelMap = {
                   class="map-mod-row"
                   :class="{ active: isLessonInModuleActive(mod), 'is-open': mapModuleOpen[mod] }"
                 >
-                  <button type="button" class="map-mod-hit" @click="loadModuleFirstLesson(mod)">
-                    <span class="map-item-icon is-dot" />
+                  <button
+                    type="button"
+                    class="map-mod-hit"
+                    :aria-expanded="mapModuleOpen[mod]"
+                    @click="toggleMapModule(mod)"
+                  >
+                    <span
+                      class="map-item-icon"
+                      :class="isLessonInModuleActive(mod) ? 'is-pin' : 'is-dot'"
+                      aria-hidden="true"
+                    />
                     <div class="map-item-text">
                       <div class="map-mod-title">{{ moduleNameMap[mod] }}</div>
                       <p class="map-mod-subtitle">{{ getLessonsForModule(mod)[0]?.title }}</p>
@@ -1672,22 +1831,36 @@ const runtimeLabelMap = {
           <div class="progress-rail-body">
             <div class="progress-rail-top">
               <span class="progress-rail-label">本课程进度</span>
-              <span class="progress-rail-pct">30%</span>
+              <span class="progress-rail-pct">{{ courseProgressPercent }}%</span>
             </div>
             <div class="progress-line is-brand">
-              <span style="width: 30%"></span>
+              <span :style="{ width: courseProgressWidth }"></span>
             </div>
             <div class="progress-rail-cumulative">累计学习</div>
             <div class="progress-rail-stats">
               <div class="progress-stat">
                 <span class="progress-stat-ico ico-day" aria-hidden="true" />
-                <span>12 天</span>
+                <span>已完成 {{ completedLessonCount }}/{{ totalLessonCount }} 节</span>
               </div>
               <div class="progress-stat">
                 <span class="progress-stat-ico ico-time" aria-hidden="true" />
-                <span>36 小时</span>
+                <span>已开始 {{ visitedLessonCount }}/{{ totalLessonCount }} 节</span>
               </div>
             </div>
+            <div class="progress-rail-cumulative">当前课程</div>
+            <div class="progress-rail-current">
+              <span class="progress-current-title">{{ selectedLesson?.title ?? '未选择课程' }}</span>
+              <span class="progress-current-state">{{ currentLessonProgressText }}</span>
+            </div>
+            <div class="progress-rail-stats">
+              <div class="progress-stat">
+                <span class="progress-stat-ico ico-day" aria-hidden="true" />
+                <span>文档完成 {{ completedSectionCount }}/{{ totalDocSectionCount }} 节</span>
+              </div>
+            </div>
+            <button type="button" class="progress-rail-action" @click="toggleSelectedLessonDone">
+              {{ currentLessonDone ? '取消当前课完成' : '标记当前课完成' }}
+            </button>
           </div>
         </section>
       </aside>

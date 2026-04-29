@@ -14,12 +14,21 @@ const vueLabStarter: Lesson['starterCode'] = {
   js: `import { createApp } from 'vue'\nimport App from './App.vue'\nimport './style.css'\n\ncreateApp(App).mount('#app')\n`,
 }
 
+/** Node.js 子课：以后端工具与本地服务为主，练习建议在本机终端完成 */
+const nodeLocalStarter: Lesson['starterCode'] = {
+  html: `<main class="node-lab">\n  <h2>Node.js 后端工具练习</h2>\n  <p>本章主要在本机终端完成：创建 Node 项目、启动 Koa 服务、给前端提供 API。</p>\n\n  <section class="node-card">\n    <h3>建议交付</h3>\n    <ul>\n      <li>一个可启动的 Node/Koa 服务</li>\n      <li>至少 2 个 API：列表查询 + 新增或更新</li>\n      <li>一份前端如何调用接口的说明</li>\n    </ul>\n  </section>\n</main>`,
+  css: `body {\n  margin: 0;\n  font-family: system-ui, sans-serif;\n  background: #f2fdff;\n  color: #12313a;\n}\n\n.node-lab {\n  max-width: 760px;\n  margin: 0 auto;\n  padding: 40px 24px;\n}\n\n.node-card {\n  margin-top: 18px;\n  padding: 18px;\n  border: 1px solid #c9f2f7;\n  border-radius: 14px;\n  background: #fff;\n}\n\n.node-card h3 {\n  margin-top: 0;\n}\n\n.node-card li {\n  line-height: 1.8;\n}`,
+  js: `// Node.js 章节的代码主要在本机终端 / 独立项目中完成。\n// 你可以按文档创建 server.js，并用 node server.js 或 npm run dev 启动。\nconsole.log('Node.js practice: build a small backend tool for frontend work.')\n`,
+}
+
 export const moduleNameMap: Record<Lesson['module'], string> = {
   basics: 'HTML / CSS / JS',
   improve: 'JavaScript 提高',
   engineering: '前端工程化',
   typescript: 'TypeScript',
   vue: 'Vue',
+  nodejs: 'Node.js',
+  practice: '来自小日菜的委托',
 }
 
 export const lessons: Lesson[] = [
@@ -419,5 +428,121 @@ export const lessons: Lesson[] = [
       '可复用逻辑 = composable 函数里返回 `ref` 与若干方法，与 Pinia 存储的全局态区分。',
     ],
     starterCode: vueLabStarter,
+  },
+  {
+    id: 'node-01',
+    module: 'nodejs',
+    partLabel: '定位',
+    level: '基础',
+    title: 'Node.js 对前端工程师有什么用',
+    goal: '理解 Node.js 不是“另一门语言”，而是让 JavaScript 跑在浏览器之外，用来写脚本、工具、Mock 服务与轻量后端。',
+    practiceRequiresSandbox: false,
+    scriptLanguage: 'javascript',
+    hints: [
+      '先把 Node.js 看成前端工具箱：运行脚本、处理文件、启动本地服务。',
+      '区分浏览器运行时与 Node 运行时：DOM、BOM、文件系统、网络能力不同。',
+      '本章练习优先在本机终端完成，右侧只保留任务说明。',
+    ],
+    starterCode: nodeLocalStarter,
+  },
+  {
+    id: 'node-02',
+    module: 'nodejs',
+    partLabel: '脚本',
+    level: '基础',
+    title: '用 Node 写前端自动化脚本',
+    goal: '使用 npm scripts、Node 内置模块与命令行参数，完成文件处理、批量生成、开发辅助等前端高频自动化任务。',
+    practiceRequiresSandbox: false,
+    scriptLanguage: 'javascript',
+    hints: [
+      '`node:fs/promises` 适合读写文件，`node:path` 负责跨平台路径拼接。',
+      '把常用命令写进 `package.json > scripts`，比记长命令更可靠。',
+      '脚本要有清晰输入、输出与错误提示，方便团队成员使用。',
+    ],
+    starterCode: nodeLocalStarter,
+  },
+  {
+    id: 'node-03',
+    module: 'nodejs',
+    partLabel: 'HTTP',
+    level: '基础',
+    title: 'HTTP 服务、接口与前后端联调',
+    goal: '理解请求、响应、路由、状态码、JSON 与跨域这些后端接口基础，为前端调接口和定位问题建立后端视角。',
+    practiceRequiresSandbox: false,
+    scriptLanguage: 'javascript',
+    hints: [
+      '前端调接口时，先看 URL、method、status、response body 四件事。',
+      'REST 接口通常用 GET/POST/PUT/PATCH/DELETE 表达不同动作。',
+      '跨域不是浏览器坏了，而是服务端响应头与浏览器安全策略共同决定。',
+    ],
+    starterCode: nodeLocalStarter,
+  },
+  {
+    id: 'node-04',
+    module: 'nodejs',
+    partLabel: 'Koa',
+    level: '基础',
+    title: 'Koa 入门：写一个小型 API 服务',
+    goal: '用 Koa 启动一个 HTTP 服务，理解 ctx、洋葱模型中间件、路由拆分，并写出前端可调用的 JSON API。',
+    practiceRequiresSandbox: false,
+    scriptLanguage: 'javascript',
+    hints: [
+      'Koa 的核心是 `async (ctx, next)` 中间件，`ctx` 同时管理请求与响应。',
+      '中间件顺序很重要：日志、错误处理、body 解析、路由通常按层组织。',
+      'Koa 适合作为前端 Mock、BFF、管理后台轻量接口服务的起点。',
+    ],
+    starterCode: nodeLocalStarter,
+  },
+  {
+    id: 'node-05',
+    module: 'nodejs',
+    partLabel: '数据',
+    level: '进阶',
+    title: 'Koa 中间件、Router、Body 与错误处理',
+    goal: '掌握 `@koa/router`、`koa-bodyparser`、统一错误响应与简单内存数据仓库，做出完整的 CRUD API 雏形。',
+    practiceRequiresSandbox: false,
+    scriptLanguage: 'javascript',
+    hints: [
+      '接口返回结构尽量统一，例如 `{ data, message }` 或 `{ error }`。',
+      '先用内存数组练 CRUD，重点放在路由设计、参数校验和错误处理。',
+      '真实项目再替换为数据库、鉴权和日志系统，不要一开始就堆复杂度。',
+    ],
+    starterCode: nodeLocalStarter,
+  },
+  {
+    id: 'node-06',
+    module: 'nodejs',
+    partLabel: 'BFF',
+    level: '进阶',
+    title: '面向前端的后端工具：Mock、BFF 与部署',
+    goal: '把 Node/Koa 用作前端团队的后端工具：聚合接口、代理请求、模拟数据、服务静态资源，并理解上线前的基本检查。',
+    practiceRequiresSandbox: false,
+    scriptLanguage: 'javascript',
+    hints: [
+      'BFF 的价值是贴近前端页面组装数据，不是把所有后端逻辑搬到 Node。',
+      'Mock 服务要尽量接近真实接口结构，方便后续无痛切换。',
+      '部署前确认端口、环境变量、日志、错误响应与静态资源路径。',
+    ],
+    starterCode: nodeLocalStarter,
+  },
+  {
+    id: 'practice-01',
+    module: 'practice',
+    partLabel: '第一章',
+    level: '进阶',
+    title: '从 0 到 1 拆解 ManageSystemDemo',
+    goal: '以真实仓库为主线，按“启动项目 -> 理清架构 -> 打通登录与主流程 -> 形成可交付说明”的顺序，一步步完成 Vue 管理系统第一章实战。',
+    practiceRequiresSandbox: false,
+    scriptLanguage: 'vue',
+    hints: [
+      '本章全部在本地完成：先做“可运行基线”，把 Node 版本、依赖安装、启动命令、环境变量四件套先对齐。',
+      '阅读代码按入口走：`main.ts` -> 路由 -> 布局 -> 页面，不要一上来全局乱翻。',
+      '先打通最小闭环（登录、守卫、主布局、列表页），再迭代权限、封装和体验。',
+    ],
+    starterCode: {
+      html: `<template>\n  <main class="practice-wrap">\n    <h2>Vue 实战 · 项目作业 01</h2>\n    <p class="practice-desc">\n      目标仓库：\n      <a\n        href="https://github.com/CainHappyfish/ManageSystemDemo"\n        target="_blank"\n        rel="noreferrer noopener"\n      >\n        ManageSystemDemo\n      </a>\n    </p>\n\n    <section class="practice-card">\n      <h3>本节交付清单</h3>\n      <ul>\n        <li>1. 在本地成功启动项目，并记录启动步骤。</li>\n        <li>2. 完成登录 -> 主布局 -> 至少 1 个业务页面的可用链路。</li>\n        <li>3. 输出你的实现说明（模块拆分、关键代码、问题与优化）。</li>\n      </ul>\n    </section>\n  </main>\n</template>\n\n<script setup lang=\"ts\">\n// 这是作业说明页起稿。实际编码请在本地克隆仓库完成。\n</script>\n`,
+      css: `:root {\n  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;\n}\n\n* {\n  box-sizing: border-box;\n}\n\nbody {\n  margin: 0;\n  background: #f8fafc;\n}\n\n#app {\n  min-height: 100vh;\n}\n\n.practice-wrap {\n  max-width: 860px;\n  margin: 0 auto;\n  padding: 40px 24px 56px;\n}\n\n.practice-wrap h2 {\n  margin: 0 0 10px;\n}\n\n.practice-desc {\n  margin: 0 0 18px;\n  color: #475569;\n}\n\n.practice-desc a {\n  color: #2563eb;\n}\n\n.practice-card {\n  padding: 18px;\n  border: 1px solid #e2e8f0;\n  border-radius: 12px;\n  background: #fff;\n}\n\n.practice-card h3 {\n  margin: 0 0 10px;\n}\n\n.practice-card ul {\n  margin: 0;\n  padding-left: 18px;\n  color: #334155;\n  line-height: 1.7;\n}\n`,
+      js: `import { createApp } from 'vue'\nimport App from './App.vue'\nimport './style.css'\n\ncreateApp(App).mount('#app')\n`,
+    },
   },
 ]

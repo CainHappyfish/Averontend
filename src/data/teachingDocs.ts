@@ -223,4 +223,85 @@ export const moduleDocs: Record<ModuleKey, ModuleDoc> = {
       },
     ],
   },
+  nodejs: {
+    module: 'nodejs',
+    title: 'Node.js：前端工程师的后端工具箱',
+    summary: '把 Node.js 当作前端能力的延伸：写自动化脚本、启动 Mock 服务、用 Koa 做轻量 API 与 BFF，服务于真实前后端联调。',
+    quickChecklist: [
+      '运行时定位：Node 负责脚本、文件、HTTP 服务和工程工具',
+      '接口能力：理解 HTTP、REST、状态码、JSON、跨域与联调排查',
+      'Koa 实战：中间件、Router、Body、错误处理与 CRUD API',
+    ],
+    topics: [
+      {
+        title: 'Node.js 的前端价值',
+        commonUsage: ['npm scripts', '文件生成脚本', 'Mock API', 'BFF 数据聚合'],
+        exampleCode: `import { writeFile } from 'node:fs/promises'\n\nawait writeFile('notes/api.md', '# API Notes\\n', 'utf-8')\nconsole.log('created notes/api.md')`,
+        analysis: [
+          'Node.js 让前端可以用 JavaScript 处理浏览器之外的任务。',
+          '脚本化能减少重复劳动，让团队流程更稳定。',
+          'Mock 与 BFF 能让前端在后端未完全就绪时继续推进。',
+        ],
+      },
+      {
+        title: 'HTTP 与接口联调',
+        commonUsage: ['GET/POST/PUT/PATCH/DELETE', '状态码判断', 'JSON 请求体', 'CORS 跨域'],
+        exampleCode: `await fetch('http://localhost:3000/api/practices', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({ title: '合奏练习' }),\n})`,
+        analysis: [
+          '接口问题要从 URL、method、请求体、状态码、响应体逐项排查。',
+          'REST 风格让 CRUD 语义更清晰，适合管理系统。',
+          '跨域需要服务端响应头配合，不是单纯前端代码问题。',
+        ],
+      },
+      {
+        title: 'Koa 小型服务',
+        commonUsage: ['ctx 请求上下文', 'async 中间件', '@koa/router', 'koa-bodyparser'],
+        exampleCode: `import Koa from 'koa'\nimport Router from '@koa/router'\n\nconst app = new Koa()\nconst router = new Router({ prefix: '/api' })\n\nrouter.get('/health', (ctx) => {\n  ctx.body = { data: { status: 'ok' } }\n})\n\napp.use(router.routes())\napp.listen(3000)`,
+        analysis: [
+          'Koa 的中间件模型适合组织日志、错误处理、鉴权和路由。',
+          'Router 负责接口分组，bodyparser 负责解析 JSON 请求体。',
+          '先用内存数据练 CRUD，再逐步接入数据库或真实后端。',
+        ],
+      },
+    ],
+  },
+  practice: {
+    module: 'practice',
+    title: 'Vue 实战项目作业',
+    summary: '围绕真实仓库做“可运行、可讲解、可迭代”的项目作业，强调工程落地能力。',
+    quickChecklist: [
+      '先跑通项目：版本、依赖、启动命令与环境变量',
+      '再做闭环：登录、路由守卫、布局页与至少一个业务页面',
+      '最后复盘：结构设计、关键取舍、风险与后续计划',
+    ],
+    topics: [
+      {
+        title: '项目接管与启动排障',
+        commonUsage: ['锁定 Node 版本', '安装依赖并启动 dev', '记录首个可运行版本'],
+        exampleCode: `git clone https://github.com/CainHappyfish/ManageSystemDemo\ncd ManageSystemDemo\nnpm install\nnpm run dev`,
+        analysis: [
+          '接手项目第一目标是可运行，而不是立即重构。',
+          '环境问题优先通过版本对齐与最小重装排查。',
+        ],
+      },
+      {
+        title: '最小业务闭环',
+        commonUsage: ['登录鉴权', '路由守卫', '布局容器 + 列表页'],
+        exampleCode: `router.beforeEach((to) => {\n  const token = localStorage.getItem('token')\n  if (!token && to.path !== '/login') return '/login'\n  return true\n})`,
+        analysis: [
+          '先打通一条用户路径，避免功能点碎片化。',
+          '路由与状态的联动是后台系统的主线能力。',
+        ],
+      },
+      {
+        title: '作业交付与复盘表达',
+        commonUsage: ['README 交付说明', '模块职责图', '已知问题与优化计划'],
+        exampleCode: `## 本次改动\n- 完成登录、菜单与用户列表闭环\n- 增加路由守卫与 token 持久化\n\n## 后续计划\n- 权限粒度控制\n- 错误边界与监控`,
+        analysis: [
+          '可讲解的交付比“只跑得起来”更接近真实团队协作。',
+          '复盘文档应让下一位开发者能快速接手。',
+        ],
+      },
+    ],
+  },
 }

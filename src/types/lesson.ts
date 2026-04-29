@@ -1,4 +1,11 @@
-export type ModuleKey = 'basics' | 'improve' | 'engineering' | 'typescript' | 'vue'
+export type ModuleKey =
+  | 'basics'
+  | 'improve'
+  | 'engineering'
+  | 'typescript'
+  | 'vue'
+  | 'nodejs'
+  | 'practice'
 
 export type LessonStarter = {
   html: string

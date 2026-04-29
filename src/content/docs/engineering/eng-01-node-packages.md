@@ -27,6 +27,28 @@ npm -v
 - **`npm install` / `npm i`**：按锁文件与 `package.json` 安装依赖。
 - **`npm run <script>`**：执行 `package.json` 里 `scripts` 下的命令，如 `dev`、`build`、`preview`。
 
+### 国内网络下的 npm 换源
+
+当安装依赖明显变慢或出现超时，可临时切到国内镜像源（以 npmmirror 为例）：
+
+```bash
+npm config set registry https://registry.npmmirror.com
+npm config get registry
+```
+
+恢复官方源：
+
+```bash
+npm config set registry https://registry.npmjs.org
+npm config get registry
+```
+
+也可只对单次安装命令使用镜像，不改全局配置：
+
+```bash
+npm install --registry=https://registry.npmmirror.com
+```
+
 ### 示例：`scripts` 长什么样
 
 单页应用里常把 dev/build/preview 交给 Vite：

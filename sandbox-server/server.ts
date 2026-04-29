@@ -20,10 +20,13 @@ import {
   getAuthSessionUser,
   getSandboxSessionRecordById,
   getSandboxSessionRecordByUserId,
+  getUserProgress,
   listExpiredSandboxSessionRecords,
+  saveUserProgress,
   touchAuthSession,
   touchSandboxSessionRecord,
   type SandboxSessionRecord,
+  type UserProgressRecord,
   upsertSandboxSessionRecord,
   type UserRecord,
   verifyUserCredentials,
@@ -106,6 +109,11 @@ interface SandboxFiles {
 interface AuthState {
   user: UserRecord | null
   authSessionId: string | null
+}
+
+interface ProgressRequestBody {
+  completedLessonIds?: unknown
+  visitedLessonIds?: unknown
 }
 
 const sessions = new Map<string, Session>()
@@ -200,6 +208,16 @@ const httpError = (status: number, message: string) => {
 }
 
 const getBody = (ctx: Context) => (ctx.request.body ?? {}) as RequestBody
+
+const parseProgressBody = (body: ProgressRequestBody) => {
+  const toLessonIds = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+
+  const completedLessonIds = toLessonIds(body.completedLessonIds)
+  const visitedLessonIds = [...new Set([...toLessonIds(body.visitedLessonIds), ...completedLessonIds])]
+
+  return { completedLessonIds, visitedLessonIds }
+}
 
 const parseLanguage = (value: unknown): ScriptLanguage =>
   value === 'typescript' || value === 'vue' ? value : 'javascript'
@@ -974,6 +992,26 @@ router.post('/api/auth/logout', authOptional, async (ctx) => {
   if (auth.authSessionId) deleteAuthSession(auth.authSessionId)
   clearAuthCookie(ctx)
   ctx.body = { ok: true }
+})
+
+router.get('/api/progress', requireAuth, (ctx) => {
+  const user = getAuthedUser(ctx)
+  const progress = getUserProgress(user.id)
+  ctx.body = {
+    ok: true,
+    progress,
+  }
+})
+
+router.put('/api/progress', requireAuth, (ctx) => {
+  const user = getAuthedUser(ctx)
+  const body = getBody(ctx) as ProgressRequestBody
+  const { completedLessonIds, visitedLessonIds } = parseProgressBody(body)
+  const progress: UserProgressRecord = saveUserProgress(user.id, completedLessonIds, visitedLessonIds)
+  ctx.body = {
+    ok: true,
+    progress,
+  }
 })
 
 router.get('/api/sandbox/status', authOptional, async (ctx) => {

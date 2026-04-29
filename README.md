@@ -104,6 +104,19 @@ npm install
 npm run dev
 ```
 
+如果你在国内网络环境安装依赖较慢，可先切换 npm 镜像源（以 npmmirror 为例）：
+
+```bash
+npm config set registry https://registry.npmmirror.com
+npm config get registry
+```
+
+需要恢复官方源时执行：
+
+```bash
+npm config set registry https://registry.npmjs.org
+```
+
 `npm run dev` 会同时启动：
 
 - `Vite` 前端开发服务器
