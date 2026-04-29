@@ -34,8 +34,6 @@ import node04Doc from '../content/docs/nodejs/node-04-koa-basic.md?raw'
 import node05Doc from '../content/docs/nodejs/node-05-koa-crud.md?raw'
 import node06Doc from '../content/docs/nodejs/node-06-bff-mock-deploy.md?raw'
 import practice01Doc from '../content/docs/vue-practice/vue-practice-01-manage-system-demo.md?raw'
-import practice02Doc from '../content/docs/vue-practice/vue-practice-02-manage-system-demo-b-route.md?raw'
-import practice03Doc from '../content/docs/vue-practice/vue-practice-03-stage-checkpoints-capstone.md?raw'
 
 export const moduleDocMarkdownMap: Record<ModuleKey, string> = {
   /** 当无法按节命中时使用（不应长期依赖，仅兜底） */
@@ -61,8 +59,6 @@ const vueByLessonId: Record<string, string> = {
 
 const practiceByLessonId: Record<string, string> = {
   'practice-01': practice01Doc,
-  'practice-02': practice02Doc,
-  'practice-03': practice03Doc,
 }
 
 const nodejsByLessonId: Record<string, string> = {
