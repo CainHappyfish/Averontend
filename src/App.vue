@@ -459,6 +459,7 @@ const scrollbarCleanupFns: Array<() => void> = []
 
 const selectedLesson = computed(() => lessons.find((item) => item.id === selectedLessonId.value))
 const focusedMapModule = ref<ModuleKey>(selectedLesson.value?.module ?? 'basics')
+const pageTitle = computed(() => `AVERONTEND | ${selectedLesson.value?.title ?? '课程'}`)
 const lessonIndex = computed(() => lessons.findIndex((item) => item.id === selectedLessonId.value))
 const totalLessonCount = lessons.length
 const totalDocSectionCount = lessons.reduce((sum, lesson) => sum + getDocSectionCountForLesson(lesson), 0)
@@ -486,6 +487,23 @@ const currentLessonProgressText = computed(() => {
 const lessonNeedsSandbox = computed(
   () => selectedLesson.value?.practiceRequiresSandbox !== false,
 )
+const lessonStudyMetaText = computed(() => {
+  const lesson = selectedLesson.value
+  if (!lesson) return ''
+  const difficultyMap: Record<Lesson['level'], string> = {
+    入门: '低',
+    基础: '中',
+    进阶: '中高',
+  }
+  const baseMinutesMap: Record<Lesson['level'], number> = {
+    入门: 35,
+    基础: 50,
+    进阶: 75,
+  }
+  const moduleBoost = lesson.module === 'practice' ? 25 : lesson.module === 'nodejs' ? 20 : 0
+  const estimate = baseMinutesMap[lesson.level] + moduleBoost
+  return `建议时长：约 ${estimate} 分钟 · 难度：${difficultyMap[lesson.level]}`
+})
 const hasPrevLesson = computed(() => lessonIndex.value > 0)
 const hasNextLesson = computed(() => lessonIndex.value < lessons.length - 1)
 
@@ -1512,6 +1530,13 @@ watch([docTab, selectedLessonId], async () => {
   await nextTick()
   setupSmartScrollbars()
 })
+watch(
+  pageTitle,
+  (title) => {
+    document.title = title
+  },
+  { immediate: true },
+)
 watch([mapCourseOpen, ch1PanelOpen], async () => {
   await nextTick()
   setupSmartScrollbars()
@@ -1874,6 +1899,7 @@ const runtimeLabelMap = {
         <header class="doc-header">
           <h2>{{ moduleNameMap[selectedLesson?.module ?? 'basics'] }}</h2>
           <p>当前课程：{{ selectedLesson?.title }}</p>
+          <p v-if="lessonStudyMetaText" class="doc-study-meta">{{ lessonStudyMetaText }}</p>
         </header>
 
         <section

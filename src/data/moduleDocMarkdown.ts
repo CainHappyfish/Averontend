@@ -2,6 +2,9 @@ import type { Lesson, ModuleKey } from '../types/lesson'
 import basicsCssDoc from '../content/docs/base/basics-css.md?raw'
 import basicsHtmlDoc from '../content/docs/base/basics-html.md?raw'
 import basicsJsDoc from '../content/docs/base/basics-js.md?raw'
+import basics00SetupDoc from '../content/docs/base/basics-00-setup.md?raw'
+import basics00TerminalDoc from '../content/docs/base/basics-00-terminal.md?raw'
+import basics00DebugDoc from '../content/docs/base/basics-00-debug.md?raw'
 import eng01Doc from '../content/docs/engineering/eng-01-node-packages.md?raw'
 import eng02Doc from '../content/docs/engineering/eng-02-vite-and-build.md?raw'
 import eng03Doc from '../content/docs/engineering/eng-03-git-and-modules.md?raw'
@@ -31,6 +34,8 @@ import node04Doc from '../content/docs/nodejs/node-04-koa-basic.md?raw'
 import node05Doc from '../content/docs/nodejs/node-05-koa-crud.md?raw'
 import node06Doc from '../content/docs/nodejs/node-06-bff-mock-deploy.md?raw'
 import practice01Doc from '../content/docs/vue-practice/vue-practice-01-manage-system-demo.md?raw'
+import practice02Doc from '../content/docs/vue-practice/vue-practice-02-manage-system-demo-b-route.md?raw'
+import practice03Doc from '../content/docs/vue-practice/vue-practice-03-stage-checkpoints-capstone.md?raw'
 
 export const moduleDocMarkdownMap: Record<ModuleKey, string> = {
   /** 当无法按节命中时使用（不应长期依赖，仅兜底） */
@@ -56,6 +61,8 @@ const vueByLessonId: Record<string, string> = {
 
 const practiceByLessonId: Record<string, string> = {
   'practice-01': practice01Doc,
+  'practice-02': practice02Doc,
+  'practice-03': practice03Doc,
 }
 
 const nodejsByLessonId: Record<string, string> = {
@@ -69,6 +76,9 @@ const nodejsByLessonId: Record<string, string> = {
 
 /** 多模块下：子课 id 与文档一一对应（basics / improve / engineering / typescript） */
 const basicsByLessonId: Record<string, string> = {
+  'ch0-setup': basics00SetupDoc,
+  'ch0-terminal': basics00TerminalDoc,
+  'ch0-debug': basics00DebugDoc,
   'ch1-html': basicsHtmlDoc,
   'ch1-css': basicsCssDoc,
   'ch1-js': basicsJsDoc,

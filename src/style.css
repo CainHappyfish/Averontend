@@ -1218,6 +1218,11 @@ body {
   font-size: 13px;
 }
 
+.doc-header .doc-study-meta {
+  color: #334155;
+  font-weight: 600;
+}
+
 .module-entry-note {
   max-width: var(--doc-prose-max);
   margin: 0 auto;
